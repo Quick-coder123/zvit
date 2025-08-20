@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase, TableData } from '@/lib/supabase';
 import ExportButton from '@/components/ExportButton';
 import ImportExcel from '@/components/ImportExcel';
 import Link from 'next/link';
 
 export default function Home() {
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [data, setData] = useState<TableData[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -27,6 +30,20 @@ export default function Home() {
     },
     comment: '',
   });
+  const router = useRouter();
+
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.replace('/admin');
+      } else {
+        setIsAuthenticated(true);
+      }
+      setIsAuthChecked(true);
+    }
+    checkAuth();
+  }, [router]);
 
   useEffect(() => {
     const checkConnection = async () => {
@@ -194,6 +211,12 @@ export default function Home() {
         <div className="text-2xl font-semibold text-gray-800">Завантаження...</div>
       </div>
     );
+  }
+  if (!isAuthChecked) {
+    return <div className="min-h-screen flex items-center justify-center">Перевірка авторизації...</div>;
+  }
+  if (!isAuthenticated) {
+    return null;
   }
 
   return (

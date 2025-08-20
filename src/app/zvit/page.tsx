@@ -135,6 +135,7 @@ export default function ZvitPage() {
           <nav className="flex gap-6">
             <Link href="/" className="hover:underline text-lg">Головна</Link>
             <Link href="/zvit" className="hover:underline text-lg">Звіт</Link>
+            <Link href="/admin" className="hover:underline text-lg">Адмін-панель</Link>
           </nav>
         </div>
       </header>
