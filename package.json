@@ -1,0 +1,45 @@
+{
+  "name": "neon-bastion",
+  "productName": "Неоновий Бастіон",
+  "version": "1.0.0",
+  "description": "Кооперативний sci-fi tower defense на 3 гравців з героями, грінд-прокачкою",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/standalone.js",
+    "dist": "electron-builder --win portable zip"
+  },
+  "dependencies": {
+    "three": "0.170.0",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "electron": "37.2.0",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "ua.neonbastion.game",
+    "productName": "NeonBastion",
+    "files": [
+      "electron/**",
+      "server/**",
+      "shared/**",
+      "client/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "portable": {
+      "artifactName": "NeonBastion-${version}-portable.exe"
+    }
+  },
+  "author": "Neon Bastion"
+}

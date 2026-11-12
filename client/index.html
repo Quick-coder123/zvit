@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <title>Неоновий Бастіон</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <canvas id="overlay"></canvas>
+
+  <!-- ЛОБІ -->
+  <div id="lobby">
+    <div class="lobby-bg"></div>
+    <div class="lobby-box">
+      <div class="logo">НЕОНОВИЙ <span>БАСТІОН</span></div>
+      <div class="sub">кооперативна оборона форпосту · до 3 гравців</div>
+      <div id="lobby-status">З’єднання з сервером…</div>
+      <div id="setup" class="hidden">
+        <div id="save-info"></div>
+        <div class="row">
+          <label>Складність</label>
+          <div class="seg" id="diff">
+            <button data-v="easy">Легко</button><button data-v="normal" class="on">Нормально</button><button data-v="hard">Жорстко</button>
+          </div>
+        </div>
+        <div class="hint" id="diff-hint"></div>
+        <div class="row">
+          <label>Час між нападами</label>
+          <div class="seg" id="prep">
+            <button data-v="60">1 хв</button><button data-v="120" class="on">2 хв</button><button data-v="180">3 хв</button><button data-v="300">5 хв</button><button data-v="600">10 хв</button>
+          </div>
+        </div>
+        <div class="btns">
+          <button id="btn-continue" class="big hidden">Продовжити збереження</button>
+          <button id="btn-new" class="big">Нова гра</button>
+        </div>
+        <div class="hint warn hidden" id="new-warn">Нова гра перезапише поточне збереження (резервна копія лишиться в папці збережень).</div>
+      </div>
+      <div class="controls-help">
+        <b>WASD</b> рух · <b>ЛКМ</b> стрільба · <b>Q</b> ривок · <b>E</b> граната · <b>R</b> орбітальний удар<br />
+        <b>1–6</b> будувати вежі · <b>ПКМ</b> скасувати · <b>F</b> шахта · <b>G</b> готові · <b>Tab</b> герой · <b>K</b> таланти · <b>J</b> дослідження · <b>M</b> карта · <b>Enter</b> чат · <b>Esc</b> меню
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="res">
+      <div class="res credits"><i>◈</i><span id="credits">0</span><small>кредити</small></div>
+      <div class="res crystals"><i>◆</i><span id="crystals">0</span><small>кристали</small></div>
+    </div>
+    <div id="wave-box">
+      <div id="wave-num">ХВИЛЯ 1</div>
+      <div id="wave-phase">Підготовка</div>
+      <div class="core-bar"><div id="core-fill"></div><span id="core-text">Ядро</span></div>
+      <button id="ready-btn">Готові до бою <kbd>G</kbd></button>
+    </div>
+    <div id="team"></div>
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div id="feed"></div>
+    <div id="hero-bar">
+      <div class="hb-top"><span id="hb-name"></span><span id="hb-lvl"></span><span id="hb-pts"></span></div>
+      <div class="bar hp"><div id="hp-fill"></div><span id="hp-text"></span></div>
+      <div class="bar xp"><div id="xp-fill"></div></div>
+      <div id="abilities"></div>
+    </div>
+    <div id="build-bar"></div>
+    <div id="prompt" class="hidden"></div>
+    <div id="tower-panel" class="hidden"></div>
+    <div id="banner"></div>
+    <div id="dead" class="hidden"><div>ВИ ЗАГИНУЛИ</div><span id="dead-t"></span></div>
+    <input id="chat" class="hidden" maxlength="140" placeholder="Повідомлення команді…" />
+    <div id="fps"></div>
+  </div>
+
+  <!-- ПАНЕЛІ -->
+  <div id="panel" class="hidden">
+    <div class="tabs" id="tabs">
+      <button data-tab="hero">Герой <kbd>Tab</kbd></button>
+      <button data-tab="talents">Таланти <kbd>K</kbd></button>
+      <button data-tab="research">Дослідження <kbd>J</kbd></button>
+      <button data-tab="stats">Статистика</button>
+      <button data-tab="settings">Налаштування <kbd>Esc</kbd></button>
+      <button class="close" id="panel-close">✕</button>
+    </div>
+    <div id="panel-body"></div>
+  </div>
+  <div id="bigmap" class="hidden"><canvas id="bigmap-c" width="900" height="900"></canvas></div>
+  <div id="tip" class="hidden"></div>
+  <div id="disconnected" class="hidden"><div>З’єднання з хостом втрачено</div><span>Пробуємо перепідключитися…</span></div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
