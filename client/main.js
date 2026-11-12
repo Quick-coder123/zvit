@@ -21,8 +21,9 @@ const uiK = () => settings.uiScale || 1;
 let overCanvas = false;
 
 // ───────────── налаштування ─────────────
-const DEFAULTS = { quality: 'high', vol: 0.5, music: 0.35, dmgNums: true, shakeStr: 0.8, noFlash: false, uiScale: 1, fps: false };
+const DEFAULTS = { renderScale: 1, autoRes: true, quality: 'high', vol: 0.5, music: 0.35, dmgNums: true, shakeStr: 0.8, noFlash: false, uiScale: 1, fps: false };
 let settings = { ...DEFAULTS };
+let autoK = 1, autoAcc = 0, autoN = 0; // авто-роздільність
 try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('bastion.settings') || '{}') }; } catch { /* */ }
 // RDP-сесія: за замовчуванням середня якість; безпечний режим після збою GPU — низька
 {
@@ -64,10 +65,13 @@ const G = {
     // масштаб інтерфейсу (game-ui-ux: текст має масштабуватися до 200 % без втрат)
     for (const id of ['hud', 'panel', 'tip', 'lobby', 'bigmap']) { const el = document.getElementById(id); if (el) el.style.zoom = settings.uiScale || 1; }
     world.noFlash = !!settings.noFlash;
+    if (patch.renderScale != null || patch.quality) world.setRenderScale(settings.renderScale ?? 1);
+    autoK = settings.renderScale ?? 1;
     $('fps').classList.toggle('hidden', !settings.fps);
   },
 };
 window.G = G;
+if (params.get('debug') === '1') window.__dbg = {};
 
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: false, powerPreference: 'high-performance' });
 $('gl').addEventListener('webglcontextlost', (e) => { e.preventDefault(); showFatal('Відеокарта скинула WebGL-контекст (перевантаження або збій драйвера). Гра спробує відновитися; якщо ні — знизьте якість у налаштуваннях.'); });
@@ -80,6 +84,7 @@ $('lobby-status').textContent = 'Побудова світу…';
 await new Promise((r) => setTimeout(r, 30));
 const world = new World($('gl'), settings.quality, renderer);
 const fx = new FX(world);
+if (window.__dbg) Object.assign(window.__dbg, { world, renderer });
 world.onThunder = () => setTimeout(() => audio.play('thunder'), 300 + Math.random() * 1500);
 // прогрів шейдерів: компілюємо всі матеріали наперед, щоб перший вибух чи новий ворог не давав ривка
 {
@@ -112,7 +117,7 @@ function connect() {
     $('disconnected').classList.add('hidden');
     G.send({ t: 'join', name: params.get('user') || localStorage.getItem('bastion.name') || 'Гравець' });
   };
-  ws.onmessage = (e) => onMsg(JSON.parse(e.data));
+  ws.onmessage = (e) => { const t1 = performance.now(); onMsg(JSON.parse(e.data)); PROF.net += performance.now() - t1; };
   ws.onclose = () => {
     if (!everConnected) { $('lobby-status').textContent = 'Сервер недоступний. Повтор…'; setTimeout(connect, 1500); return; }
     $('disconnected').classList.remove('hidden');
@@ -925,7 +930,22 @@ function frame(now) {
   requestAnimationFrame(frame);
   try { frameBody(now); } catch (e) { if (!frame.err) { frame.err = 1; console.error('frame error', e.message, e.stack); showFatal(e.stack || e.message); } }
 }
+// Профайлер (F3): середній час кожної частини кадру в мс — щоб бачити, що саме гальмує
+const PROF = { on: false, acc: {}, n: 0, last: 0, net: 0 };
+const pt = (k, t0) => { if (PROF.on) PROF.acc[k] = (PROF.acc[k] || 0) + performance.now() - t0; };
+window.addEventListener('keydown', (e) => { if (e.code === 'F3') { PROF.on = !PROF.on; PROF.acc = {}; PROF.n = 0; $('prof').classList.toggle('hidden', !PROF.on); e.preventDefault(); } });
+function profReport(now) {
+  if (!PROF.on) return;
+  PROF.n++;
+  if (now - PROF.last < 1000) return;
+  const inf = renderer.info.render, mem = renderer.info.memory;
+  const rows = Object.entries(PROF.acc).map(([k, v]) => `${k.padEnd(10)} ${(v / PROF.n).toFixed(2)} мс`).join('\n');
+  const pr = renderer.getPixelRatio(), sz = renderer.getDrawingBufferSize(new THREE.Vector2());
+  $('prof').textContent = `FPS ${(PROF.n * 1000 / (now - PROF.last)).toFixed(0)}  кадр ${((now - PROF.last) / PROF.n).toFixed(1)} мс\n${rows}\nмережа    ${(PROF.net / PROF.n).toFixed(2)} мс\nвиклики   ${inf.calls}\nтрикутн.  ${(inf.triangles / 1000).toFixed(0)}k\nбуфер     ${sz.x}×${sz.y} (×${pr.toFixed(2)})\nгеом/текс ${mem.geometries}/${mem.textures}\nякість    ${settings.quality}`;
+  PROF.acc = {}; PROF.n = 0; PROF.last = now; PROF.net = 0;
+}
 function frameBody(now) {
+  let t0 = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   const t = now / 1000;
@@ -934,14 +954,16 @@ function frameBody(now) {
     moveMe(dt);
     sendInput(dt);
     for (const k of ['q', 'e', 'r']) G.localCds[k] = Math.max(0, G.localCds[k] - dt);
-    updateEntities(dt, t);
+    t0 = performance.now(); updateEntities(dt, t); pt('сутності', t0);
     updateCamera(dt);
     updatePrompt();
     mapAcc += dt;
     if (mapAcc > 0.1) {
+      t0 = performance.now();
       mapAcc = 0;
       drawMap($('minimap'), 70, me);
       if (!$('bigmap').classList.contains('hidden')) drawMap($('bigmap-c'), 132);
+      pt('мінікарта', t0);
     }
     panelAcc += dt;
     if (panelAcc > 0.5) { panelAcc = 0; ui.renderPanel(); }
@@ -950,13 +972,26 @@ function frameBody(now) {
     world.camera.position.set(Math.cos(t * 0.05) * 70, 38, Math.sin(t * 0.05) * 70);
     world.camera.lookAt(0, 4, 0);
   }
-  world.update(dt, me);
+  t0 = performance.now(); world.update(dt, me); pt('погода', t0);
   gl.style.cursor = G.snap && !G.buildType ? 'none' : 'default';
   updateDying(dt);
   if (world.coreDamage > 0.3 && Math.random() < dt * world.coreDamage * 8) fx.puff((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4, 0x2c2926, 1, { speed: 0.5, life: 4, size: 1, size1: 4, alpha: 0.6, vy: 2.5 });
-  fx.update(dt);
-  world.render();
-  drawOverlay(dt);
+  t0 = performance.now(); fx.update(dt); pt('ефекти', t0);
+  t0 = performance.now(); world.render(); pt('рендер(CPU)', t0);
+  t0 = performance.now(); drawOverlay(dt); pt('оверлей', t0);
+  profReport(now);
+  // автопідлаштування роздільності: тримаємо ≥ 30 FPS, знижуючи кількість пікселів (не нижче 50 %)
+  if (G.snap && settings.autoRes) {
+    autoAcc += dt; autoN++;
+    if (autoAcc > 3) {
+      const fps = autoN / autoAcc;
+      const base = settings.renderScale ?? 1;
+      if (fps < 30 && autoK > 0.5) autoK = Math.max(0.5, autoK - 0.1);
+      else if (fps > 52 && autoK < base) autoK = Math.min(base, autoK + 0.05);
+      world.setRenderScale(autoK);
+      autoAcc = 0; autoN = 0;
+    }
+  }
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 1) { $('fps').textContent = `${Math.round(fpsN / fpsAcc)} FPS · ${enemies.size} ворогів`; fpsAcc = 0; fpsN = 0; }
   void lastSnapAt;

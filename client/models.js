@@ -89,8 +89,8 @@ class B {
 }
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
-const sph = (r, w = 12, h = 8) => new THREE.SphereGeometry(r, w, h);
-const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 4, 8);
+const sph = (r, w = 10, h = 6) => new THREE.SphereGeometry(r, Math.min(w, 10), Math.min(h, 7));
+const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 2, 7);
 function extrude(points, depth, bevel = 0.05) {
   const sh = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
   const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bevel > 0, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 1 });

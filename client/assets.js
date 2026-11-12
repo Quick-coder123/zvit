@@ -51,6 +51,13 @@ export async function loadAssets(renderer, onProgress) {
     }).catch(() => {}));
   }
   await Promise.all(jobs);
+  // мішки з піском: низькополігональна «подушка» (24–48 трикутників замість 211) — тисячі інстансів
+  if (A.glb.cement_bag) {
+    const g = new THREE.SphereGeometry(0.5, 8, 4);
+    g.scale(0.46, 0.2, 0.7); g.translate(0, 0.09, 0);
+    g.computeBoundingBox();
+    A.glb.cement_bag.geo = g; A.glb.cement_bag.box = g.boundingBox;
+  }
   // мішки з піском замість цементних
   if (A.glb.cement_bag) {
     const m = A.glb.cement_bag.mat;

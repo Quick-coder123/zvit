@@ -127,7 +127,8 @@ export class World {
     this.q = QUALITY[quality] || QUALITY.high;
     this.qualityKey = quality;
     const r = (this.renderer = renderer);
-    r.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr));
+    this.renderScale = 1;
+    r.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr) * this.renderScale);
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 0.9;
     r.outputColorSpace = THREE.SRGBColorSpace;
@@ -164,7 +165,8 @@ export class World {
   setQuality(key) {
     this.q = QUALITY[key] || QUALITY.high;
     this.qualityKey = key;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr) * this.renderScale);
+    if (this.ground) { this.ground.material.defines.LOWQ = key === 'low' ? 1 : 0; this.ground.material.needsUpdate = true; }
     this.renderer.shadowMap.enabled = this.q.shadows > 0;
     if (this.q.shadows) {
       this.sun.shadow.mapSize.set(this.q.shadows, this.q.shadows);
@@ -175,6 +177,13 @@ export class World {
     this.resize();
   }
 
+  setRenderScale(k) {
+    k = Math.max(0.5, Math.min(1, k));
+    if (Math.abs(k - this.renderScale) < 0.01) return;
+    this.renderScale = k;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr) * k);
+    this.resize();
+  }
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
@@ -252,7 +261,8 @@ export class World {
     mask.needsUpdate = true;
     // У masks.y=0 відповідає z=-160 (рядки по z)
 
-    const geo = new THREE.PlaneGeometry(S, S, 240, 240);
+    const seg = this.qualityKey === 'low' ? 130 : this.qualityKey === 'medium' ? 180 : 240;
+    const geo = new THREE.PlaneGeometry(S, S, seg, seg);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)));
@@ -278,7 +288,11 @@ export class World {
           float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
             return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
+          #if LOWQ
+          vec3 tri(sampler2D t, vec2 uv){ return texture2D(t, uv).rgb; }
+          #else
           vec3 tri(sampler2D t, vec2 uv){ return mix(texture2D(t, uv).rgb, texture2D(t, uv * 0.31 + vec2(0.37, 0.71)).rgb, 0.42); }
+          #endif
           float gSnow; vec4 gMask;`)
         .replace('#include <map_fragment>', `
           vec2 wuv = vWP.xz;
@@ -306,6 +320,7 @@ export class World {
         .replace('#include <roughnessmap_fragment>', `float roughnessFactor = mix(0.95, 0.38, uWet * (1.0 - gSnow) * (0.6 + gMask.r * 0.4 + gMask.g * 0.3));
           roughnessFactor = mix(roughnessFactor, 0.7, gSnow);`)
         .replace('#include <normal_fragment_maps>', `
+          #if !LOWQ
           {
             vec3 tg = texture2D(tGrassN, wuv * 0.22).xyz * 2.0 - 1.0;
             vec3 tm = texture2D(tMudN, wuv * 0.2).xyz * 2.0 - 1.0;
@@ -316,9 +331,11 @@ export class World {
             vec3 gw = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
             vec3 wn = normalize(gw * tn.z + vec3(tn.x, 0.0, -tn.y) * 1.1);
             normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
-          }`);
+          }
+          #endif`);
     };
-    mat.customProgramCacheKey = () => 'terrain';
+    mat.defines = { LOWQ: this.qualityKey === 'low' ? 1 : 0 };
+    mat.customProgramCacheKey = () => 'terrain' + mat.defines.LOWQ;
     const ground = (this.ground = new THREE.Mesh(geo, mat));
     ground.receiveShadow = true;
     this.scene.add(ground);
@@ -770,7 +787,8 @@ export class World {
       this.campObjs.push({ def: c });
     }
     this.instanced('cement_bag', bags);
-    this.instanced('old_military_crate', crates);
+    const crateGeo = boxUV(new THREE.BoxGeometry(0.95, 0.42, 0.65).translate(0, 0.21, 0), 0.9);
+    this.instancedGeo(crateGeo, pbr('green_metal_rust', 1), crates);
     this.instanced('dead_tree_trunk_02', logs);
   }
 

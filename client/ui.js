@@ -386,6 +386,8 @@ export class UI {
     const q = G.settings.quality;
     body.innerHTML = `<h2>Налаштування</h2>
       <div class="set-row"><label>Якість графіки</label><div class="seg" id="set-q">${Object.entries(QUALITY).map(([k, v]) => `<button data-v="${k}" class="${k === q ? 'on' : ''}">${v.name}</button>`).join('')}</div></div>
+      <div class="set-row"><label>Роздільність рендеру</label><input type="range" id="set-rs" min="0.5" max="1" step="0.05" value="${G.settings.renderScale ?? 1}"><span id="set-rs-v">${Math.round((G.settings.renderScale ?? 1) * 100)}%</span></div>
+      <div class="set-row"><label>Авто-роздільність</label><input type="checkbox" id="set-auto" ${G.settings.autoRes !== false ? 'checked' : ''}><span class="hint-s">знижує роздільність, якщо FPS падає нижче 30</span></div>
       <div class="set-row"><label>Гучність ефектів</label><input type="range" id="set-vol" min="0" max="1" step="0.05" value="${G.settings.vol}"></div>
       <div class="set-row"><label>Гучність музики</label><input type="range" id="set-mus" min="0" max="1" step="0.05" value="${G.settings.music}"></div>
       <div class="set-row"><label>Показувати цифри шкоди</label><input type="checkbox" id="set-dmg" ${G.settings.dmgNums ? 'checked' : ''}></div>
@@ -399,6 +401,8 @@ export class UI {
       <div style="color:var(--dim);font-size:12px;margin-top:20px;line-height:1.8">F11 — повноекранний режим · колесо миші — масштаб камери · ПКМ на вежі/предметі — швидкі дії.<br>
       Якщо гра гальмує через RDP, увімкніть на хост-ПК групову політику «Use hardware graphics adapters for all Remote Desktop Services sessions» або знизьте якість.</div>`;
     body.querySelectorAll('#set-q button').forEach((b) => b.addEventListener('click', () => { G.applySettings({ quality: b.dataset.v }); this.renderPanel(true); }));
+    $('set-rs').onchange = (e) => { G.applySettings({ renderScale: +e.target.value }); $('set-rs-v').textContent = Math.round(e.target.value * 100) + '%'; };
+    $('set-auto').onchange = (e) => G.applySettings({ autoRes: e.target.checked });
     $('set-vol').oninput = (e) => G.applySettings({ vol: +e.target.value });
     $('set-mus').oninput = (e) => G.applySettings({ music: +e.target.value });
     $('set-dmg').onchange = (e) => G.applySettings({ dmgNums: e.target.checked });
