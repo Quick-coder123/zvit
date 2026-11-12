@@ -118,9 +118,10 @@ export class UI {
     const W = WEATHER[s.wx] || WEATHER.clear;
     $('wx').innerHTML = `${SEASONS[s.sea]?.name || ''} · ${W.name}${W.desc ? ` <span>(${W.desc})</span>` : ''}`;
     // команда
-    $('team').innerHTML = s.players.map((p) => `<div class="tm ${p.d ? 'dead' : ''}" style="border-left-color:${hex(p.c)}">
+    const teamHtml = s.players.map((p) => `<div class="tm ${p.d ? 'dead' : ''}" style="border-left-color:${hex(p.c)}">
       <div class="n"><span>${esc(p.n)}${p.n === G.name ? ' (ви)' : ''}</span><span>рів. ${p.l}${p.rd && s.phase === 'prep' ? ' <span class="rd">✓</span>' : ''}</span></div>
       <div class="b"><div style="width:${(p.hp / p.mhp) * 100}%;background:${p.d ? '#555' : hex(p.c)}"></div></div>${p.d ? `<small>відродження ${p.rs} с</small>` : ''}</div>`).join('');
+    if (teamHtml !== this._teamHtml) { this._teamHtml = teamHtml; $('team').innerHTML = teamHtml; } // DOM лише при змінах
     // герой
     if (meP && G.me) {
       const pr = G.me.profile;
@@ -388,7 +389,9 @@ export class UI {
       <div class="set-row"><label>Гучність ефектів</label><input type="range" id="set-vol" min="0" max="1" step="0.05" value="${G.settings.vol}"></div>
       <div class="set-row"><label>Гучність музики</label><input type="range" id="set-mus" min="0" max="1" step="0.05" value="${G.settings.music}"></div>
       <div class="set-row"><label>Показувати цифри шкоди</label><input type="checkbox" id="set-dmg" ${G.settings.dmgNums ? 'checked' : ''}></div>
-      <div class="set-row"><label>Тряска камери</label><input type="checkbox" id="set-shake" ${G.settings.shake ? 'checked' : ''}></div>
+      <div class="set-row"><label>Сила тряски камери</label><input type="range" id="set-shake" min="0" max="1" step="0.05" value="${G.settings.shakeStr ?? 0.8}"><span id="set-shake-v">${Math.round((G.settings.shakeStr ?? 0.8) * 100)}%</span></div>
+      <div class="set-row"><label>Менше спалахів</label><input type="checkbox" id="set-noflash" ${G.settings.noFlash ? 'checked' : ''}><span class="hint-s">приглушує спалахи вибухів, блискавок і червоний екран поранення</span></div>
+      <div class="set-row"><label>Масштаб інтерфейсу</label><input type="range" id="set-ui" min="0.8" max="2" step="0.1" value="${G.settings.uiScale || 1}"><span id="set-ui-v">${Math.round((G.settings.uiScale || 1) * 100)}%</span></div>
       <div class="set-row"><label>Показувати FPS</label><input type="checkbox" id="set-fps" ${G.settings.fps ? 'checked' : ''}></div>
       <div class="set-row"><label>Час між нападами ${G.host ? '' : '(змінює лише хост)'}</label><div class="seg" id="set-prep">${[60, 120, 180, 300, 600, 900].map((v) => `<button data-v="${v}" class="${G.world.cfg.prepTime === v ? 'on' : ''}" ${G.host ? '' : 'disabled'}>${v / 60} хв</button>`).join('')}</div></div>
       <div class="set-row"><label>Збереження</label><button id="set-save">Зберегти зараз</button><span style="color:var(--dim);font-size:12px">Автозбереження після кожної хвилі та щохвилини</span></div>
@@ -399,7 +402,9 @@ export class UI {
     $('set-vol').oninput = (e) => G.applySettings({ vol: +e.target.value });
     $('set-mus').oninput = (e) => G.applySettings({ music: +e.target.value });
     $('set-dmg').onchange = (e) => G.applySettings({ dmgNums: e.target.checked });
-    $('set-shake').onchange = (e) => G.applySettings({ shake: e.target.checked });
+    $('set-shake').oninput = (e) => { G.applySettings({ shakeStr: +e.target.value }); $('set-shake-v').textContent = Math.round(e.target.value * 100) + '%'; };
+    $('set-noflash').onchange = (e) => G.applySettings({ noFlash: e.target.checked });
+    $('set-ui').onchange = (e) => { G.applySettings({ uiScale: +e.target.value }); $('set-ui-v').textContent = Math.round(e.target.value * 100) + '%'; };
     $('set-fps').onchange = (e) => G.applySettings({ fps: e.target.checked });
     body.querySelectorAll('#set-prep button').forEach((b) => b.addEventListener('click', () => G.send({ t: 'cfg', prepTime: +b.dataset.v })));
     $('set-save').onclick = () => G.send({ t: 'saveNow' });

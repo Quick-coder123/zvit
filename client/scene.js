@@ -4,15 +4,17 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { A, texRep } from './assets.js';
 import { LANES, DEPOSITS, CAMPS, BASE_R, distToLanes, canBuildAt, GRID, inCity, CITY } from '/shared/data.js';
+import { cityBuildings } from '/shared/collision.js';
 
 export const QUALITY = {
-  low: { name: 'Низька', shadows: 0, bloom: false, pr: 1, particles: 0.5, trees: 0.45, grass: 0, rain: 0.5 },
-  medium: { name: 'Середня', shadows: 1024, bloom: false, pr: 1, particles: 0.75, trees: 0.7, grass: 200, rain: 0.75 },
-  high: { name: 'Висока', shadows: 2048, bloom: true, pr: 1, particles: 1, trees: 1, grass: 450, rain: 1 },
-  ultra: { name: 'Ультра', shadows: 4096, bloom: true, pr: 1.5, particles: 1.2, trees: 1.25, grass: 900, rain: 1.3 },
+  low: { name: 'Низька', shadows: 0, bloom: false, grade: false, pr: 1, particles: 0.5, trees: 0.45, grass: 0, rain: 0.5 },
+  medium: { name: 'Середня', shadows: 1024, bloom: false, grade: false, pr: 1, particles: 0.75, trees: 0.7, grass: 200, rain: 0.75 },
+  high: { name: 'Висока', shadows: 2048, bloom: true, grade: true, pr: 1, particles: 1, trees: 1, grass: 450, rain: 1 },
+  ultra: { name: 'Ультра', shadows: 4096, bloom: true, grade: true, pr: 1.5, particles: 1.2, trees: 1.25, grass: 900, rain: 1.3 },
 };
 
 // ───────── шум ─────────
@@ -202,6 +204,7 @@ export class World {
     }
   }
   flash(x, y, z, color, intensity = 60, life = 0.2) {
+    if (this.noFlash) intensity *= 0.25;
     const l = this.flashLights.find((f) => f.userData.life <= 0) || this.flashLights.reduce((a, b) => (a.userData.life < b.userData.life ? a : b));
     l.position.set(x, y, z);
     l.color.set(color);
@@ -476,31 +479,16 @@ export class World {
     const interior = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 1 });
     const geos = { plaster: [], brick: [], conc: [], dark: [] };
     const placed = [];
-    const blockers = [...CAMPS.map((c) => [c.x, c.z, 8]), ...DEPOSITS.map((d) => [d.x, d.z, 10])];
-    const tries = 400;
-    let count = 0;
-    for (let i = 0; i < tries * 3 && count < 30; i++) {
-      const rr = CITY.rMin + 8 + rnd() * (CITY.rMax - CITY.rMin - 12);
-      const aa = ca + (rnd() - 0.5) * CITY.spread * 1.7;
-      const x = Math.cos(aa) * rr, z = Math.sin(aa) * rr;
-      if (inCity(x, z) < 0.55) continue;
-      const big = rnd() < 0.45;
-      const w = big ? 16 + rnd() * 10 : 7 + rnd() * 5, d = big ? 10 : 6 + rnd() * 4;
-      const rad = Math.hypot(w, d) / 2 + 1.5;
-      if (distToLanes(x, z) < rad + 4) continue;
-      if (blockers.some(([bx, bz, br]) => Math.hypot(bx - x, bz - z) < rad + br)) continue;
-      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < rad + p.rad)) continue;
-      const rot = ca + (rnd() < 0.5 ? 0 : Math.PI / 2) + (rnd() - 0.5) * 0.08;
-      const floors = big ? 3 + Math.floor(rnd() * 3) : 1 + Math.floor(rnd() * 2);
-      const kind = big ? (rnd() < 0.6 ? 'plaster' : 'conc') : 'brick';
-      const b = makeRuin(w, d, floors, rnd, big);
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) - 0.1, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -rot, 0)), new THREE.Vector3(1, 1, 1));
-      for (const gg of b.walls) geos[kind].push(gg.applyMatrix4(m));
+    // розміщення спільне з сервером (shared/collision.js): стіни на екрані = стіни в симуляції
+    for (const h of cityBuildings()) {
+      const brnd = srand(h.seed);
+      const b = makeRuin(h.w, h.d, h.floors, brnd, h.big);
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(h.x, terrainHeight(h.x, h.z) - 0.1, h.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, h.rot, 0)), new THREE.Vector3(1, 1, 1));
+      for (const gg of b.walls) geos[h.kind].push(gg.applyMatrix4(m));
       for (const gg of b.slabs) geos.conc.push(gg.applyMatrix4(m));
       for (const gg of b.dark) geos.dark.push(gg.applyMatrix4(m));
-      placed.push({ x, z, rad, rubble: b.rubble.map(([lx, lz, s]) => { const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(m); return [v.x, v.z, s]; }) });
-      this.colliders.push({ x, z, w: w + 0.6, d: d + 0.6, rot: -rot });
-      count++;
+      placed.push({ x: h.x, z: h.z, rad: Math.hypot(h.w, h.d) / 2 + 1.5, rubble: b.rubble.map(([lx, lz, sz]) => { const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(m); return [v.x, v.z, sz]; }) });
+      this.colliders.push(h);
     }
     const add = (list, mat) => { if (!list.length) return; const me = new THREE.Mesh(mergeGeometries(list), mat); me.castShadow = me.receiveShadow = true; this.scene.add(me); };
     add(geos.plaster.map((g) => boxUV(g, 3)), plaster);
@@ -837,19 +825,37 @@ export class World {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.35, 0.4, 0.95);
     this.composer.addPass(this.bloom);
+    // кольорокорекція «плівки» в лінійному просторі, перед OutputPass (тонмапінг + sRGB)
+    this.grade = new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, sat: { value: 1 }, contrast: { value: 1.04 }, tint: { value: new THREE.Vector3(1, 1, 1) }, vignette: { value: 0.32 }, grain: { value: 0.035 }, time: { value: 0 } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, contrast, vignette, grain, time; uniform vec3 tint; varying vec2 vUv;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + time * 61.7) * 43758.5453); }
+        void main(){
+          vec4 c = texture2D(tDiffuse, vUv);
+          float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+          vec3 col = mix(vec3(l), c.rgb, sat) * tint;
+          // контраст довкола середньо-сірого в лог-просторі (стабільно для HDR)
+          col = exp2((log2(max(col, 1e-5)) - log2(0.18)) * contrast + log2(0.18));
+          vec2 d = vUv - 0.5; col *= 1.0 - vignette * smoothstep(0.25, 0.85, dot(d, d) * 2.2);
+          col *= 1.0 + (h(vUv * 931.0) - 0.5) * grain;
+          gl_FragColor = vec4(col, c.a);
+        }`,
+    });
+    this.composer.addPass(this.grade);
     this.composer.addPass(new OutputPass());
   }
 
   // ───── погода ─────
   setWeather(kind, season, instant = false) {
     const P = {
-      clear: { env: 'clear', sun: 2.2, hemi: 0.45, envI: 0.75, fog: 0.0028, fogC: 0xb9c6d2, exp: 0.8, rain: 0, snow: 0, wet: 0 },
-      cloudy: { env: 'overcast', sun: 1.0, hemi: 0.6, envI: 0.9, fog: 0.0042, fogC: 0x9ea6ad, exp: 0.95, rain: 0, snow: 0, wet: 0 },
-      rain: { env: 'overcast', sun: 0.5, hemi: 0.7, envI: 0.85, fog: 0.0075, fogC: 0x8b9298, exp: 1.0, rain: 1, snow: 0, wet: 1 },
-      storm: { env: 'overcast', sun: 0.3, hemi: 0.55, envI: 0.6, fog: 0.009, fogC: 0x6c7379, exp: 0.95, rain: 1.6, snow: 0, wet: 1 },
-      fog: { env: 'misty', sun: 0.7, hemi: 0.8, envI: 1.0, fog: 0.019, fogC: 0xb0b4b6, exp: 1.05, rain: 0, snow: 0, wet: 0.4 },
-      snow: { env: 'winter', sun: 0.8, hemi: 0.8, envI: 1.0, fog: 0.0085, fogC: 0xc3c9d0, exp: 0.95, rain: 0, snow: 1, wet: 0 },
-      blizzard: { env: 'winter', sun: 0.35, hemi: 0.75, envI: 0.85, fog: 0.022, fogC: 0xc9ced4, exp: 0.95, rain: 0, snow: 2.2, wet: 0 },
+      clear: { gSat: 1.06, gTint: [1.03, 1.0, 0.95], env: 'clear', sun: 2.2, hemi: 0.45, envI: 0.75, fog: 0.0028, fogC: 0xb9c6d2, exp: 0.8, rain: 0, snow: 0, wet: 0 },
+      cloudy: { gSat: 0.88, gTint: [0.99, 1.0, 1.02], env: 'overcast', sun: 1.0, hemi: 0.6, envI: 0.9, fog: 0.0042, fogC: 0x9ea6ad, exp: 0.95, rain: 0, snow: 0, wet: 0 },
+      rain: { gSat: 0.8, gTint: [0.96, 0.99, 1.04], env: 'overcast', sun: 0.5, hemi: 0.7, envI: 0.85, fog: 0.0075, fogC: 0x8b9298, exp: 1.0, rain: 1, snow: 0, wet: 1 },
+      storm: { gSat: 0.72, gTint: [0.94, 0.98, 1.05], env: 'overcast', sun: 0.3, hemi: 0.55, envI: 0.6, fog: 0.009, fogC: 0x6c7379, exp: 0.95, rain: 1.6, snow: 0, wet: 1 },
+      fog: { gSat: 0.8, gTint: [1.0, 1.0, 1.0], env: 'misty', sun: 0.7, hemi: 0.8, envI: 1.0, fog: 0.019, fogC: 0xb0b4b6, exp: 1.05, rain: 0, snow: 0, wet: 0.4 },
+      snow: { gSat: 0.85, gTint: [0.95, 0.99, 1.06], env: 'winter', sun: 0.8, hemi: 0.8, envI: 1.0, fog: 0.0085, fogC: 0xc3c9d0, exp: 0.95, rain: 0, snow: 1, wet: 0 },
+      blizzard: { gSat: 0.75, gTint: [0.94, 0.99, 1.08], env: 'winter', sun: 0.35, hemi: 0.75, envI: 0.85, fog: 0.022, fogC: 0xc9ced4, exp: 0.95, rain: 0, snow: 2.2, wet: 0 },
     }[kind] || {};
     if (season === 3 && kind === 'clear') P.env = 'winter';
     this.wx.kind = kind; this.wx.season = season; this.wx.target = P;
@@ -892,7 +898,7 @@ export class World {
       w.nextBolt -= dt;
       if (w.nextBolt <= 0) { w.nextBolt = 6 + Math.random() * 10; w.flash = 1; this.onThunder && this.onThunder(); }
     }
-    if (w.flash > 0) { w.flash -= dt * 3; bolt = Math.max(0, w.flash) * (Math.random() > 0.3 ? 1 : 0.2); }
+    if (w.flash > 0) { w.flash -= dt * 3; bolt = Math.max(0, w.flash) * (this.noFlash ? 0.15 : Math.random() > 0.3 ? 1 : 0.2); }
     this.sun.intensity = w.sun;
     this.hemi.intensity = w.hemi + bolt * 3;
     this.scene.environmentIntensity = w.envI + bolt * 2;
@@ -900,6 +906,13 @@ export class World {
     this.scene.fog.density = w.fog;
     this.scene.fog.color.copy(w.fogC);
     this.renderer.toneMappingExposure = w.exp;
+    if (this.grade) {
+      const U = this.grade.uniforms, kk = 1 - Math.exp(-dt * 0.5);
+      U.sat.value += ((P.gSat ?? 1) * (w.autumn > 0.5 ? 1.05 : 1) - U.sat.value) * kk;
+      const tt = P.gTint || [1, 1, 1];
+      U.tint.value.x += (tt[0] - U.tint.value.x) * kk; U.tint.value.y += (tt[1] - U.tint.value.y) * kk; U.tint.value.z += (tt[2] - U.tint.value.z) * kk;
+      U.time.value = this.clock % 100;
+    }
     // крони дерев: листя взимку зникає
     if (this.crowns) {
       this.crowns.visible = w.leaves > 0.05;
@@ -956,7 +969,8 @@ export class World {
   }
 
   render() {
-    if (this.q.bloom) this.composer.render();
+    if (this.bloom) this.bloom.enabled = !!this.q.bloom;
+    if (this.q.bloom || this.q.grade) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
 }

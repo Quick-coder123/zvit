@@ -7,11 +7,23 @@
       "skillPath": "skills/disciplines/ai-behavior-trees-utility-ai/SKILL.md",
       "computedHash": "cf907aa8e339ca034ebd30a868148f7fa678dd3058f17636002772835612724a"
     },
+    "algorithmic-art": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/algorithmic-art/SKILL.md",
+      "computedHash": "4a85abfeaa09f2dd2c4b76c85d57b65f61dc10d55c3cca245989cee8897c2be5"
+    },
     "audio-design": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/disciplines/audio-design/SKILL.md",
       "computedHash": "9cc7466f3e608710f6d6c56337f9ace788fb7569038c4dc26c8b30b2200c511d"
+    },
+    "balance-check": {
+      "source": "donchitos/claude-code-game-studios",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/balance-check/SKILL.md",
+      "computedHash": "4884754f2f7acec3b36be2d4853d5e8afa750a0b5bbdcc173d385a07c5000b1b"
     },
     "bevy-ecs": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
@@ -24,6 +36,12 @@
       "sourceType": "github",
       "skillPath": "skills/disciplines/camera-systems/SKILL.md",
       "computedHash": "eee6290a3ef6c74f2e0a4d4aac8545801201ac24fe01daf1684d46b6434fcfd7"
+    },
+    "canvas-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/canvas-design/SKILL.md",
+      "computedHash": "1866477474e694f562261008bb6a817e53f027b6347b062fbd1e2ee2eb83f20d"
     },
     "card-game": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
@@ -55,17 +73,35 @@
       "skillPath": "skills/ebitengine/ebitengine-game/SKILL.md",
       "computedHash": "2a58eae214ce02a7ccec816b64fea35e10c75b818d678b45ca485591b4e1a117"
     },
+    "ecs": {
+      "source": "drawcall-ai/game-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ecs/SKILL.md",
+      "computedHash": "89719c2abb5722deb94f186e0ae516d0fe4bd8e5e0565d83fea633cc7c8230c3"
+    },
     "fps-shooter": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/genres/fps-shooter/SKILL.md",
       "computedHash": "b3e440060bbbeb1a3b0a6fc3b9db8e12acdeaaab99d436427ba1a9d93bc826e1"
     },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c"
+    },
     "game-ai": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/disciplines/game-ai/SKILL.md",
       "computedHash": "f8e19076e9f79447fc94b553c656d15e8461e21d896e7d22b53c45a18c6e6bc6"
+    },
+    "game-design-core": {
+      "source": "omer-metin/skills-for-antigravity",
+      "sourceType": "github",
+      "skillPath": "skills/game-design-core/SKILL.md",
+      "computedHash": "96ed879c24e173f4a888815c96465ddfb9c9b57b1e8b90d17e94c2350b73a00d"
     },
     "game-docs": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
@@ -367,11 +403,77 @@
       "skillPath": "skills/genres/survival-crafting/SKILL.md",
       "computedHash": "92be358e06dd4cf07b26394147a5a84b391ab18a9011da5c2f2af90bd6915588"
     },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/systematic-debugging/SKILL.md",
+      "computedHash": "79ff0583175346e39431b0dc713b223edd1bd7a7ea2b6c8b78b2fb9a3fed6782"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "2782702b2cf69ace085ed30d067b6f8bfd2d777ad51770fc5bdae9cb5c1b5c04"
+    },
+    "threejs-animation": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-animation/SKILL.md",
+      "computedHash": "2686d953e17a59121254760b34b3af59c861a29fac28cd5f40f9b054e916ccfb"
+    },
+    "threejs-asset-pipeline": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-asset-pipeline/SKILL.md",
+      "computedHash": "9187f3f4ccb4961ed13a903a351e8acc84fd3a8fb270d303b38d88f951f4797e"
+    },
+    "threejs-fundamentals": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-fundamentals/SKILL.md",
+      "computedHash": "268a79c9d3f35bd7deffc65293f4bd1bcc141b496c69b0f67e9886fc28def4b2"
+    },
+    "threejs-gameplay-systems": {
+      "source": "majidmanzarpour/threejs-game-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-gameplay-systems/SKILL.md",
+      "computedHash": "62c0a8a9f1488aac549d97748b2a4e49cf15a556e7ebd3154de8425701fa27ae"
+    },
+    "threejs-geometry": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-geometry/SKILL.md",
+      "computedHash": "4762a54ba7a32357b80135b0c33cca56cccfb708c1e23d2f8aabd3bd8acc8a95"
+    },
     "threejs-gltf-loading": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/web-engines/threejs-gltf-loading/SKILL.md",
       "computedHash": "62f37032641f7d504b63f43a4b2fbf7a7ef37009461086049c927bd8bfc65c0c"
+    },
+    "threejs-interaction": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-interaction/SKILL.md",
+      "computedHash": "160f06e61488f74734eaf75ef51e8a55624777e3ffa3d6a0fd4f325813ceff87"
+    },
+    "threejs-lighting": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-lighting/SKILL.md",
+      "computedHash": "025264a0e58480fe4a573391d8e7cba119f45ea1a35643a8d938fa44cc8df42e"
+    },
+    "threejs-loaders": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-loaders/SKILL.md",
+      "computedHash": "9947526431eff5a4e0b3f813ad1c701daf50cbdfeb3c50d116af697e87e8bdbd"
+    },
+    "threejs-materials": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-materials/SKILL.md",
+      "computedHash": "138b23dd0b365bc6ee2f20eebcf1fcfb426b6acaeeda18c57c88039f8628d9aa"
     },
     "threejs-materials-lighting": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
@@ -379,11 +481,41 @@
       "skillPath": "skills/web-engines/threejs-materials-lighting/SKILL.md",
       "computedHash": "c9e551ce59c90c4a788c5d848151f28539342b1e4df35e0921c2641dd6088221"
     },
+    "threejs-performance": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-performance/SKILL.md",
+      "computedHash": "edc078cf2cb729eb4a808ee3c202f4bdbda40a0beb6e34f2cf7b1f5003f11783"
+    },
+    "threejs-postprocessing": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-postprocessing/SKILL.md",
+      "computedHash": "d64cfe3bd54fe32a7267aa833bdfb320504747576ddc96500e44767792720e86"
+    },
+    "threejs-react-three-fiber": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-react-three-fiber/SKILL.md",
+      "computedHash": "68a27f2c540653a732e8339b35a51d135fc26acbd9a4258e02cc301e2290f594"
+    },
     "threejs-scene-setup": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/web-engines/threejs-scene-setup/SKILL.md",
       "computedHash": "4a8c3ecad9eaa8d55ca2436c29085960c439a547082ba8586c1e73a528338cb2"
+    },
+    "threejs-shaders": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-shaders/SKILL.md",
+      "computedHash": "4ba49c86b4233fb1fb4321509fd7baefaf05fa139c6ce6090a8ef5096616f38d"
+    },
+    "threejs-textures": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-textures/SKILL.md",
+      "computedHash": "c9d53239206d8d152de16bfa630760f289616c86c43b47e94599be3b19c32d05"
     },
     "tower-defense": {
       "source": "gamedev-skills/awesome-gamedev-agent-skills",

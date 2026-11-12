@@ -8,7 +8,7 @@ import { Game } from './game.js';
 import { TICK } from '../shared/data.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.ttf': 'font/ttf' };
 
 function resolveThree() {
   const candidates = [path.join(ROOT, 'node_modules', 'three'), path.join(ROOT, '..', 'node_modules', 'three')];
@@ -28,7 +28,7 @@ export function startServer({ port, saveDir, host = '0.0.0.0', autoContinue = fa
   const server = http.createServer((req, res) => {
     let url = decodeURIComponent((req.url || '/').split('?')[0]);
     if (url === '/') url = '/index.html';
-    if (url === '/favicon.ico') { res.writeHead(204); res.end(); return; }
+    if (url === '/favicon.ico') url = '/favicon.png';
     for (const [prefix, dir] of routes) {
       if (!url.startsWith(prefix)) continue;
       const file = path.normalize(path.join(dir, url.slice(prefix.length)));

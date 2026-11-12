@@ -4,6 +4,8 @@ import { World, terrainHeight } from './scene.js';
 import { loadAssets } from './assets.js';
 import { makeHero, makeTower, setTowerLevel, makeEnemy, makeLoot, makeGhost, makeDrone, burntMaterial } from './models.js';
 import { FX } from './fx.js';
+import { pushOutOfRects } from '/shared/collision.js';
+import { Trauma, popScale } from './feel.js';
 import { Audio } from './audio.js';
 import { UI } from './ui.js';
 import {
@@ -15,9 +17,11 @@ import {
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+const uiK = () => settings.uiScale || 1;
+let overCanvas = false;
 
 // ───────────── налаштування ─────────────
-const DEFAULTS = { quality: 'high', vol: 0.5, music: 0.35, dmgNums: true, shake: true, fps: false };
+const DEFAULTS = { quality: 'high', vol: 0.5, music: 0.35, dmgNums: true, shakeStr: 0.8, noFlash: false, uiScale: 1, fps: false };
 let settings = { ...DEFAULTS };
 try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('bastion.settings') || '{}') }; } catch { /* */ }
 
@@ -40,6 +44,10 @@ const G = {
     if (patch.quality) { world.setQuality(patch.quality); fx.mul = world.q.particles; }
     audio.setVolume(settings.vol);
     audio.setMusic(settings.music);
+    if (settings.shake === false) { settings.shake = undefined; settings.shakeStr = 0; }
+    // масштаб інтерфейсу (game-ui-ux: текст має масштабуватися до 200 % без втрат)
+    for (const id of ['hud', 'panel', 'tip', 'lobby', 'bigmap']) { const el = document.getElementById(id); if (el) el.style.zoom = settings.uiScale || 1; }
+    world.noFlash = !!settings.noFlash;
     $('fps').classList.toggle('hidden', !settings.fps);
   },
 };
@@ -63,9 +71,13 @@ world.onThunder = () => setTimeout(() => audio.play('thunder'), 300 + Math.rando
   for (const t of TOWER_TYPES) { const o = makeTower(t); setTowerLevel(o, 16); warm.add(o); }
   warm.add(makeHero(0xffffff), makeLoot(4), makeGhost('mg'), makeDrone());
   const burnt = makeEnemy('tank'); burnt.traverse((o) => { if (o.isMesh) o.material = burntMaterial(); }); warm.add(burnt);
+  // розставляємо моделі перед камерою і робимо справжній кадр: так компілюються й шейдери тіней,
+  // і варіанти для інстансів, яких renderer.compile() не покриває
+  warm.children.forEach((o, i) => o.position.set((i % 8) * 6 - 21, 0, Math.floor(i / 8) * 6 - 8));
   world.scene.add(warm);
-  fx.explosion(0, 0, 1, 0.1); fx.eshot([0, 0], [1, 1], 1, 'mg'); fx.spawnProjectile({ id: -1, k: 'atgm', p: [0, -5, 0], v: [0, 0, 1], ttl: 0.01 });
-  try { renderer.compile(world.scene, world.camera); } catch (e) { console.warn(e); }
+  world.camera.position.set(0, 40, 45); world.camera.lookAt(0, 0, 0);
+  fx.explosion(0, 0, 1, 0.1); fx.eshot([0, 0], [1, 1], 1, 'mg'); fx.spawnProjectile({ id: -1, k: 'atgm', p: [0, 2, 0], v: [0, 0, 1], ttl: 0.01 });
+  try { renderer.compile(world.scene, world.camera); world.render(); } catch (e) { console.warn(e); }
   world.scene.remove(warm);
 }
 G.applySettings({});
@@ -216,7 +228,8 @@ function onSnap(s) {
       for (const k of ['q', 'e', 'r']) if (!(G.localCds[k] > p.cds[k] + 0.4)) G.localCds[k] = p.cds[k];
       if (prev) {
         const old = prev.players.find((x) => x.n === G.name);
-        if (old && p.hp < old.hp - 1 && !p.d) { audio.play('hurt'); hurtFlash = Math.min(1, hurtFlash + 0.35); }
+        if (old && p.hp < old.hp - 1 && !p.d) { audio.play('hurt'); hurtFlash = Math.min(1, hurtFlash + 0.35); shake(Math.min(0.35, 0.08 + (old.hp - p.hp) / p.mhp)); }
+        if (old && !old.d && p.d) shake(0.7);
       }
     }
   }
@@ -236,6 +249,7 @@ function onSnap(s) {
       enemies.set(id, e);
       obj.position.set(x, terrainHeight(x, z), z);
     }
+    if (e.hp != null && (hp < e.hp - 0.001 || (sh >= 0 && e.sh != null && sh < e.sh - 0.001))) e.flinch = 1;
     e.tx = x; e.tz = z; e.trot = rot; e.hp = hp; e.sh = sh; e.slow = slow; e.lvl = lvl;
   }
   for (const [id, e] of enemies) if (!seen.has(id)) { enemies.delete(id); startDying(e); }
@@ -309,11 +323,15 @@ function handleEvent(ev) {
       const d = ENEMIES[ENEMY_KINDS[ev.k]];
       if (d.boss) { audio.play('bigboom'); shake(0.8); ui.banner('ЦІЛЬ ЗНИЩЕНО', d.name, '#e8b24a', 3); }
       else if (d.vehicle || d.flying) audio.play('boom', near(ev.x, ev.z));
+      if (ev.n === G.name) { hitMarks.push({ t: 0.35, max: 0.35, kill: true }); audio.play('ui'); }
       if (ev.c > 0 && Math.hypot(ev.x - me.x, ev.z - me.z) < 45) floaters.push({ x: ev.x, y: 2.5, z: ev.z, text: `+${fmt(ev.c)} ₴`, color: '#e8c35a', t: 1.1, size: 13 });
       break;
     }
     case 'dmg':
-      if (ev.n === G.name && settings.dmgNums) floaters.push({ x: ev.x + (Math.random() - 0.5), y: 2.5, z: ev.z, text: fmt(ev.v), color: ev.c ? '#ffd23a' : '#ffffff', t: 0.8, size: ev.c ? 20 : 14 });
+      if (ev.n === G.name) {
+        if (settings.dmgNums) floaters.push({ x: ev.x + (Math.random() - 0.5), y: 2.5, z: ev.z, text: fmt(ev.v), color: ev.c ? '#ffd23a' : '#ffffff', t: 0.8, max: 0.8, size: ev.c ? 20 : 14, pop: true });
+        hitMarks.push({ t: 0.18, max: 0.18, crit: !!ev.c, kill: false });
+      }
       break;
     case 'spark': {
       let e = null, bd = 3;
@@ -327,6 +345,7 @@ function handleEvent(ev) {
     case 'orbit': fx.artillery(ev.x, ev.z); audio.play('incoming'); setTimeout(() => { audio.play('bigboom'); shake(0.6); }, 1200); break;
     case 'drop': fx.explosion(ev.x, ev.z, 1.5, 0.4); audio.play('smallboom', near(ev.x, ev.z)); break;
     case 'eshot': fx.eshot(ev.a, ev.b, ev.y, ev.k); audio.play(ev.k === 'cannon' ? 'cannon' : 'emg', near(ev.a[0], ev.a[1])); break;
+    case 'wallhit': fx.puff(ev.x, terrainHeight(ev.x, ev.z) + 1.3, ev.z, 0xa09a8c, 3, { speed: 2.5, life: 0.7, size: 0.25, size1: 0.9, alpha: 0.6 }); fx.emit(ev.x, terrainHeight(ev.x, ev.z) + 1.3, ev.z, 0xffd090, 2, { speed: 4, life: 0.12, size: 0.2 }); break;
     case 'core': fx.explosion(ev.x, ev.z, 3, 1); audio.play('boom'); shake(0.3); break;
     case 'heal': fx.emit(ev.x, terrainHeight(ev.x, ev.z) + 1.5, ev.z, 0xbfe0ff, 4, { speed: 3, life: 0.2, size: 0.2, grav: 1 }); break;
     case 'unload': fx.puff(ev.x, terrainHeight(ev.x, ev.z) + 0.5, ev.z, 0x8a7f6a, 14, { speed: 3, life: 1.5, size: 0.8, size1: 2.5, alpha: 0.5 }); break;
@@ -386,7 +405,14 @@ function updateDying(dt) {
     if (d.t > d.life) { world.scene.remove(o); dying.splice(i, 1); }
   }
 }
-function shake(a) { if (settings.shake) world.shake = Math.max(world.shake || 0, a); }
+// game-feel: тряска на травмі; сила — налаштування доступності, з відстанню слабшає
+const trauma = new Trauma();
+function shake(a, x = null, z = null) {
+  const k = x == null ? 1 : Math.max(0, 1 - Math.hypot(x - me.x, z - me.z) / 80);
+  trauma.add(a * k);
+}
+world.addTrauma = shake;
+const hitMarks = [];
 
 // ───────────── введення ─────────────
 const keys = new Set();
@@ -429,6 +455,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => { keys.clear(); mouse.down = false; });
 window.addEventListener('mousemove', (e) => {
+  overCanvas = e.target === gl || e.target === overlay;
   mouse.x = e.clientX; mouse.y = e.clientY;
   mouse.nx = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.ny = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -546,18 +573,7 @@ function moveMe(dt) {
     if (d < r && d > 0.001) { me.x = cx + (dx / d) * r; me.z = cz + (dz / d) * r; }
   };
   push(0, 0, 7.4);
-  for (const c of world.colliders) {
-    const dx = me.x - c.x, dz = me.z - c.z;
-    const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
-    const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
-    const hw = c.w / 2 + 0.5, hd = c.d / 2 + 0.5;
-    if (Math.abs(lx) < hw && Math.abs(lz) < hd) {
-      const px = hw - Math.abs(lx), pz = hd - Math.abs(lz);
-      let nx = lx, nz = lz;
-      if (px < pz) nx = Math.sign(lx || 1) * hw; else nz = Math.sign(lz || 1) * hd;
-      me.x = c.x + nx * cs + nz * sn; me.z = c.z - nx * sn + nz * cs;
-    }
-  }
+  [me.x, me.z] = pushOutOfRects(me.x, me.z, world.colliders, 0.5);
   for (const t of G.world.towers) push(t.x, t.z, t.type === 'howitzer' ? 3.2 : 2.4);
   const c = clampPos(me.x, me.z); me.x = c.x; me.z = c.z;
   me.ax = mouse.world.x; me.az = mouse.world.z;
@@ -618,6 +634,7 @@ function updateEntities(dt, t) {
     const y = u.flying ? ground + fh + Math.sin(t * 2 + e.seed) * (e.kind === 'fpv' ? 0.3 : 0.6) : ground;
     o.position.set(e.x, y, e.z);
     o.rotation.y = e.rot;
+    if (e.flinch > 0) { e.flinch = Math.max(0, e.flinch - dt * 7); const fl = Math.sin(e.flinch * Math.PI) * (u.human ? 0.16 : 0.03); u.body.rotation.x = -fl; } else if (u.human) u.body.rotation.x = 0;
     const sp = Math.hypot(e.x - (e.px ?? e.x), e.z - (e.pz ?? e.z)) / Math.max(dt, 1e-3);
     e.px = e.x; e.pz = e.z;
     if (u.human) {
@@ -678,13 +695,12 @@ function updateCamera(dt) {
   const target = tmpV.set(me.x + ox, 0, me.z + oz);
   camLook.lerp(target, 1 - Math.exp(-dt * 6));
   camPos.set(camLook.x, camLook.y + h, camLook.z + back);
+  trauma.strength = settings.shakeStr ?? 0.8;
+  trauma.update(dt);
   world.camera.position.copy(camPos);
-  if (world.shake > 0) {
-    world.camera.position.x += (Math.random() - 0.5) * world.shake;
-    world.camera.position.y += (Math.random() - 0.5) * world.shake;
-    world.shake = Math.max(0, world.shake - dt * 2.5);
-  }
+  world.camera.position.x += trauma.x; world.camera.position.y += trauma.y * 0.6;
   world.camera.lookAt(camLook);
+  world.camera.rotateZ(trauma.roll);
 }
 
 // ───────────── оверлей (смужки здоров’я, імена, цифри) ─────────────
@@ -787,14 +803,37 @@ function drawOverlay(dt) {
     const p = project(f.x, f.y, f.z);
     if (!p) continue;
     octx.globalAlpha = Math.min(1, f.t * 2.5);
-    octx.font = `700 ${f.size}px Bahnschrift, Segoe UI, sans-serif`;
+    const ps = f.pop ? popScale(Math.min(1, (f.max - f.t) / 0.22)) : 1;
+    octx.font = `700 ${Math.round(f.size * ps * uiK())}px Tektur, Bahnschrift, Segoe UI, sans-serif`;
     octx.strokeStyle = 'rgba(0,0,0,.8)'; octx.lineWidth = 3;
     octx.strokeText(f.text, p[0], p[1]);
     octx.fillStyle = f.color; octx.fillText(f.text, p[0], p[1]);
   }
   octx.globalAlpha = 1;
   if (floaters.length > 120) floaters.splice(0, floaters.length - 120);
-  // червоний спалах при отриманні шкоди
+  // приціл і маркери влучання (game-feel: миттєве підтвердження кожного влучання)
+  if (G.snap && !G.buildType && !ui.isOpen() && overCanvas) {
+    const cx = mouse.x, cy = mouse.y, r = 9 * uiK();
+    octx.strokeStyle = 'rgba(235,230,214,.85)'; octx.lineWidth = 1.5;
+    octx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { octx.moveTo(cx + dx * r * 0.45, cy + dy * r * 0.45); octx.lineTo(cx + dx * r, cy + dy * r); }
+    octx.stroke();
+    for (let i = hitMarks.length - 1; i >= 0; i--) {
+      const hm = hitMarks[i];
+      hm.t -= dt;
+      if (hm.t <= 0) { hitMarks.splice(i, 1); continue; }
+      const k = hm.t / hm.max, s = (hm.kill ? 14 : hm.crit ? 11 : 8) * uiK() * (1 + (1 - k) * 0.3);
+      octx.globalAlpha = k;
+      octx.strokeStyle = hm.kill ? '#e8463a' : hm.crit ? '#ffd23a' : '#ffffff'; octx.lineWidth = hm.kill ? 3 : 2;
+      octx.beginPath();
+      for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { octx.moveTo(cx + dx * s * 0.45, cy + dy * s * 0.45); octx.lineTo(cx + dx * s, cy + dy * s); }
+      octx.stroke();
+    }
+    octx.globalAlpha = 1;
+  }
+  if (hitMarks.length > 12) hitMarks.splice(0, hitMarks.length - 12);
+  // червоний спалах при отриманні шкоди (вимикається в «менше спалахів»)
+  if (hurtFlash > 0 && settings.noFlash) hurtFlash = 0;
   if (hurtFlash > 0) {
     hurtFlash = Math.max(0, hurtFlash - dt * 2);
     const g = octx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.7);
@@ -894,6 +933,7 @@ function frameBody(now) {
     world.camera.lookAt(0, 4, 0);
   }
   world.update(dt, me);
+  gl.style.cursor = G.snap && !G.buildType ? 'none' : 'default';
   updateDying(dt);
   if (world.coreDamage > 0.3 && Math.random() < dt * world.coreDamage * 8) fx.puff((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4, 0x2c2926, 1, { speed: 0.5, life: 4, size: 1, size1: 4, alpha: 0.6, vy: 2.5 });
   fx.update(dt);

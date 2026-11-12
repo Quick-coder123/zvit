@@ -191,3 +191,20 @@ input[type=range] { width: 260px; accent-color: var(--c); }
 #tower-panel .modes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 #tower-panel .modes button { padding: 3px 7px; font-size: 11px; }
 #tower-panel .modes button.on { border-color: var(--gold); background: rgba(232,195,90,.2); }
+
+/* ───── Шрифт заголовків: Tektur (OFL), кирилиця + ₴ ───── */
+@font-face { font-family: 'Tektur'; src: url('fonts/Tektur-Medium.ttf') format('truetype'); font-weight: 500 900; font-display: swap; }
+@font-face { font-family: 'Tektur'; src: url('fonts/Tektur-Regular.ttf') format('truetype'); font-weight: 100 400; font-display: swap; }
+.logo, #wave-num, .res span, #banner, h2, #dead div, .tal .lv, #hb-lvl { font-family: 'Tektur', Bahnschrift, 'Segoe UI', sans-serif; }
+.logo { letter-spacing: 3px; font-weight: 700; }
+#wave-num { letter-spacing: 2px; }
+/* game-ui-ux: мінімальний розмір тексту на ПК ≈ 14–18 px (масштабується налаштуванням) */
+#feed div { font-size: 15px; }
+.tm { font-size: 14px; }
+#wave-phase, #wx, #next-wave { font-size: 13px; }
+.res small, .tb, .ab, .hint, #tip .th, .tal .tx small, .rs .tx small { font-size: 12px; }
+.hint-s { color: var(--dim); font-size: 12px; }
+/* лобі: емблема і спокійний підзаголовок (frontend-design: без розрідженого капсу й середніх крапок) */
+.emblem { width: 112px; height: 112px; display: block; margin: -8px auto 10px; filter: drop-shadow(0 6px 18px rgba(0,0,0,.55)); }
+.lobby-box .logo { font-size: 50px; letter-spacing: 1px; text-transform: none; }
+.lobby-box .sub { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--dim); }

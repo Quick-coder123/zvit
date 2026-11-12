@@ -218,7 +218,7 @@ export class FX {
     this.puff(x, y + 0.2, z, 0x9a8f7e, 10 * big, { speed: r * 1.6, life: 2.0, size: r * 0.5, size1: r * 1.8, alpha: 0.35, up: 0.2, drag: 1.5, spread: r * 0.5 });
     this.world.flash(x, y + 2, z, 0xff9a40, 70 * big, 0.25);
     if (y0 == null || y0 < 1) this.scorch(x, z, r * 0.8);
-    this.world.shake = Math.max(this.world.shake || 0, 0.12 * big * Math.min(1.5, r / 3));
+    if (this.world.addTrauma) this.world.addTrauma(0.12 * big * Math.min(1.5, r / 3), x, z);
   }
   fire(x, z, dur, size = 1, y = null) { this.fires.push({ x, z, y: y ?? terrainHeight(x, z) + 0.6, t: dur, size }); }
   artillery(x, z) {

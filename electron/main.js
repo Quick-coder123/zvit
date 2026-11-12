@@ -47,6 +47,7 @@ async function createWindow() {
     width: 1600, height: 900, minWidth: 1100, minHeight: 650,
     backgroundColor: '#05070d',
     title: 'Останній рубіж',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), backgroundThrottling: false },
   });

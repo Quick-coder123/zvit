@@ -31,13 +31,15 @@
       "shared/**",
       "client/**",
       "package.json",
-      "!client/assets/models/**"
+      "!client/assets/models/**",
+      "build/icon.png"
     ],
     "win": {
       "target": [
         "portable",
         "zip"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "directories": {
       "output": "dist"

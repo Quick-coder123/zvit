@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { cityBuildings, pushOutOfRects, segmentBlocked, toWorld } from '../shared/collision.js';
 import {
   TICK, WORLD, LANES, PORTALS, DEPOSITS, CAMPS, CAMP_TIERS, ENEMIES, ENEMY_KINDS, TOWERS, TOWER_MAX_LVL,
   DIFFICULTY, waveHpMul, waveDmgMul, bountyMul, waveComposition, wildStats, towerStats, towerUpgradeCost,
@@ -30,6 +31,7 @@ const r2 = (v) => Math.round(v * 100) / 100;
 export class Game {
   constructor(saveDir) {
     this.saveDir = saveDir;
+    this.walls = cityBuildings(); // будинки міста: укриття й перешкоди
     fs.mkdirSync(saveDir, { recursive: true });
     shareFolder(saveDir);
     this.savePath = path.join(saveDir, 'world.json');
@@ -515,7 +517,7 @@ export class Game {
     const credits = e.bounty * (1 + 0.08 * (res.r_bounty || 0));
     this.w.credits += credits;
     this.w.stats.kills++;
-    this.events.push({ e: 'die', x: r1(e.x), z: r1(e.z), k: e.ki, c: Math.round(credits) });
+    this.events.push({ e: 'die', x: r1(e.x), z: r1(e.z), k: e.ki, c: Math.round(credits), n: h ? h.name : null });
     // досвід: вбивця отримує повний, решта – половину
     for (const p of this.players()) {
       if (p.dead) continue;
@@ -860,7 +862,7 @@ export class Game {
   wildAI(e, def, sp, dt, players) {
     const home = Math.hypot(e.x - e.homeX, e.z - e.homeZ);
     if (e.state === 'leash') {
-      this.moveTo(e, e.homeX, e.homeZ, sp * 1.4, dt);
+      this.moveNav(e, e.homeX, e.homeZ, sp * 1.4, dt);
       e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.25 * dt);
       if (home < 3) e.state = 'idle';
       return;
@@ -870,7 +872,7 @@ export class Game {
       if (h) { e.state = 'chase'; e.target = h; this.alertCamp(e, h); return; }
       e.wanderT -= dt;
       if (e.wanderT <= 0) { e.wanderT = 2 + rand() * 4; const a = rand() * 6.28, r = rand() * 6; e.wx = e.homeX + Math.cos(a) * r; e.wz = e.homeZ + Math.sin(a) * r; }
-      this.moveTo(e, e.wx, e.wz, sp * 0.3, dt);
+      this.moveNav(e, e.wx, e.wz, sp * 0.3, dt);
       return;
     }
     // chase
@@ -878,9 +880,10 @@ export class Game {
     if (!h || h.dead || !this.clients.has(h.ws) || home > 32) { e.state = 'leash'; e.target = null; return; }
     const d = Math.hypot(h.x - e.x, h.z - e.z);
     const range = def.range || 14;
-    if (d > range * 0.85) this.moveTo(e, h.x, h.z, sp, dt);
+    const los = !this.blockedLOS(e.x, e.z, h.x, h.z);
+    if (d > range * 0.85 || !los) this.moveNav(e, h.x, h.z, sp, dt);
     else e.rot = Math.atan2(h.x - e.x, h.z - e.z);
-    if (d < range && e.atkCd <= 0) {
+    if (d < range && los && e.atkCd <= 0) {
       e.atkCd = def.burst ? 0.35 : e.kind === 'w_officer' ? 1.1 : 0.9;
       if (def.burst) { e.burstN = (e.burstN || 0) + 1; if (e.burstN % 5 === 0) e.atkCd = 2.2; }
       const dx = h.x - e.x, dz = h.z - e.z, sp2 = 48;
@@ -889,6 +892,37 @@ export class Game {
       this.addProjectile({ k: 'ebullet', x: e.x, y: 1.4, z: e.z, vx: vx * sp2, vy: 0, vz: vz * sp2, ttl: range / sp2 + 0.1, dmg: e.dmg, owner: null, hostile: true });
     }
   }
+  blockedLOS(ax, az, bx, bz) { return !!segmentBlocked(ax, az, bx, bz, this.walls, 0.05); }
+  // Куди йти до (tx, tz): напряму, або через кути будинку, що перекриває шлях (граф видимості в
+  // мініатюрі). Обраний кут фіксується до досягнення — інакше ворог коливається між двома кутами.
+  navPoint(e, tx, tz) {
+    const wall = segmentBlocked(e.x, e.z, tx, tz, this.walls, 0.6);
+    if (!wall) { e.navWp = null; e.navSeen = null; return [tx, tz]; }
+    if (e.navWp) {
+      if (Math.hypot(e.navWp[0] - e.x, e.navWp[1] - e.z) > 0.6) return e.navWp;
+      (e.navSeen ||= []).push(e.navWp);
+      e.navWp = null;
+    }
+    const pad = 1.6, hw = wall.w / 2 + pad, hd = wall.d / 2 + pad;
+    let best = null, bc = Infinity;
+    for (const [lx, lz] of [[hw, hd], [-hw, hd], [hw, -hd], [-hw, -hd]]) {
+      const [cx, cz] = toWorld(lx, lz, wall);
+      if (Math.hypot(cx - e.x, cz - e.z) < 0.6) continue;
+      if (e.navSeen && e.navSeen.some(([sx, sz]) => Math.hypot(sx - cx, sz - cz) < 0.5)) continue;
+      if (segmentBlocked(e.x, e.z, cx, cz, this.walls, 0.3)) continue;
+      const cost = Math.hypot(cx - e.x, cz - e.z) + Math.hypot(tx - cx, tz - cz);
+      if (cost < bc) { bc = cost; best = [cx, cz]; }
+    }
+    if (!best) { e.navSeen = null; return [tx, tz]; }
+    e.navWp = best;
+    return best;
+  }
+  moveNav(e, tx, tz, sp, dt) {
+    const [nx, nz] = this.navPoint(e, tx, tz);
+    this.moveTo(e, nx, nz, sp, dt);
+    [e.x, e.z] = pushOutOfRects(e.x, e.z, this.walls, 0.5);
+  }
+
   alertCamp(e, h) {
     if (e.camp < 0) return;
     for (const id of this.campState[e.camp].alive) {
@@ -990,6 +1024,12 @@ export class Game {
       p.x += p.vx * dt; p.y += p.vy * dt - 0.5 * p.g * dt * dt; p.z += p.vz * dt;
       p.vy -= p.g * dt;
       p.ttl -= dt;
+      // кулі (не снаряди навісного вогню й не ракети з висоти) зупиняються об будинки
+      if ((p.k === 'hero' || p.k === 'ebullet') && segmentBlocked(ox, oz, p.x, p.z, this.walls)) {
+        this.events.push({ e: 'wallhit', x: r1(p.x), z: r1(p.z) });
+        this.endProjectile(p, p.x, p.z);
+        continue;
+      }
       if (p.hostile) {
         for (const h of players) {
           if (!h.dead && segDist(h.x, h.z, ox, oz, p.x, p.z) < (p.blast ? 1.6 : 0.9)) { this.damageHero(h, p.dmg); p.ttl = -1; break; }
