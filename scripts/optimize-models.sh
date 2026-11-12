@@ -4,8 +4,10 @@ set -e
 cd "$(dirname "$0")/.."
 SRC=client/assets/models; OUT=client/assets/glb; mkdir -p $OUT
 opt() { # id ratio texsize
+  if [ "$2" = "1" ]; then SIMP="--simplify false"; else SIMP="--simplify-ratio $2 --simplify-error ${4:-0.004}"; fi
+  # рослини (ratio 1) не спрощуємо: листові пластинки схлопуються; їх проріджує клієнт
   npx gltf-transform optimize "$SRC/$1/$1.gltf" "$OUT/$1.glb" --compress false --texture-compress false \
-    --simplify-ratio "$2" --simplify-error "${4:-0.004}" --instance false --join true --palette false >/dev/null
+    $SIMP --instance false --join true --palette false >/dev/null
   npx gltf-transform resize "$OUT/$1.glb" "$OUT/$1.glb" --width "${3:-512}" --height "${3:-512}" >/dev/null
   echo "$1 -> $(du -h "$OUT/$1.glb" | cut -f1)"
 }
@@ -25,6 +27,3 @@ opt dead_tree_trunk_02 0.015 512 0.03
 opt tree_stump_01 0.012 512 0.03
 opt rock_07 0.02 512 0.03
 opt stone_01 0.004 512 0.03
-opt shrub_02 0.035 1024 0.02
-opt shrub_04 0.03 512 0.02
-opt grass_medium_01 0.05 512 0.02

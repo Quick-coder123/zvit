@@ -283,7 +283,7 @@ export class World {
           float macro = vn(wuv * 0.035) * 0.6 + vn(wuv * 0.13) * 0.4;
           vec3 grass = tri(tGrass, wuv * 0.22);
           vec3 dry = tri(tDry, wuv * 0.2);
-          float dryK = clamp(uDry * 0.55 + uAutumn * 0.85 + (macro - 0.5) * 0.7 - uSpring * 0.3, 0.0, 1.0);
+          float dryK = clamp(uDry * 0.3 + uAutumn * 0.85 + (macro - 0.5) * 0.7 - uSpring * 0.3, 0.0, 1.0);
           vec3 col = mix(grass, dry, dryK);
           col *= mix(vec3(1.0), vec3(1.04, 1.1, 0.88), uSpring);
           vec3 mud = tri(tMud, wuv * 0.2);
@@ -320,6 +320,20 @@ export class World {
     this.scene.add(ground);
   }
 
+  instancedGeo(geo, mat, list, { shadow = true } = {}) {
+    if (!list.length) return null;
+    const im = new THREE.InstancedMesh(geo, mat, list.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    list.forEach((it, i) => {
+      e.set(it.rx || 0, it.ry || 0, it.rz || 0); q.setFromEuler(e);
+      m.compose(new THREE.Vector3(it.x, it.y ?? terrainHeight(it.x, it.z), it.z), q, new THREE.Vector3(it.sx ?? it.s ?? 1, it.sy ?? it.s ?? 1, it.sz ?? it.s ?? 1));
+      im.setMatrixAt(i, m);
+    });
+    im.castShadow = shadow; im.receiveShadow = true;
+    im.computeBoundingSphere();
+    this.scene.add(im);
+    return im;
+  }
   // ───── інстанси моделей ─────
   instanced(id, list, { veg = false, shadow = true, receive = true, matOverride = null } = {}) {
     const a = A.glb[id];
@@ -596,7 +610,8 @@ export class World {
     trunks.castShadow = branches.castShadow = true;
     trunks.receiveShadow = true;
     this.scene.add(trunks, branches);
-    this.crowns = this.instanced('shrub_02', crowns, { veg: true });
+    const foliage = foliageMaterial();
+    this.crowns = this.instancedGeo(crownGeometry(26, 1), foliage, crowns.map((c) => ({ ...c, sx: (c.sx ?? c.s) * 1.6, sy: (c.sy ?? c.s) * 1.3, sz: (c.sz ?? c.s) * 1.6, y: c.y + 0.8 })));
     this.crownCount = crowns.length;
     // кущі, трава, пні, колоди, каміння
     const shrubs = [], grass = [], stumps = [], logs = [], rocks = [], stones = [];
@@ -612,10 +627,11 @@ export class World {
       if (rnd() < 0.08) rocks.push({ x: x + 3, z: z + 3, ry: rnd() * 6.28, rx: rnd() * 0.5, s: 5 + rnd() * 8 });
       if (rnd() < 0.08) stones.push({ x: x - 2, z: z + 2, ry: rnd() * 6.28, s: 8 + rnd() * 14 });
     }
-    this.instanced('shrub_04', shrubs, { veg: true });
+    this.instancedGeo(crownGeometry(12, 2), foliage, shrubs.map((b) => ({ ...b, s: b.s * 0.45, y: terrainHeight(b.x, b.z) + b.s * 0.25 })));
+    // трав'яні купини — маленькі низькі пластини
     this.grassMax = grass.length;
-    this.grass = this.instanced('grass_medium_01', grass, { veg: true, shadow: false });
-    if (this.grass) { this.grass.count = Math.min(grass.length, this.q.grass); this.grassMat = this.grass.material; }
+    this.grass = this.instancedGeo(crownGeometry(5, 3, true), foliage, grass.map((g) => ({ ...g, s: 0.5, sy: 0.35, sx: 0.6, sz: 0.6, y: terrainHeight(g.x, g.z) + 0.15 })), { shadow: false });
+    if (this.grass) this.grass.count = Math.min(grass.length, this.q.grass);
     this.instanced('tree_stump_01', stumps);
     this.instanced('dead_tree_trunk_02', logs);
     this.instanced('rock_07', rocks);
@@ -827,8 +843,8 @@ export class World {
   // ───── погода ─────
   setWeather(kind, season, instant = false) {
     const P = {
-      clear: { env: 'clear', sun: 3.0, hemi: 0.55, envI: 1.0, fog: 0.0028, fogC: 0xb9c6d2, exp: 0.95, rain: 0, snow: 0, wet: 0 },
-      cloudy: { env: 'overcast', sun: 1.1, hemi: 0.75, envI: 1.0, fog: 0.0042, fogC: 0x9ea6ad, exp: 1.05, rain: 0, snow: 0, wet: 0 },
+      clear: { env: 'clear', sun: 2.2, hemi: 0.45, envI: 0.75, fog: 0.0028, fogC: 0xb9c6d2, exp: 0.8, rain: 0, snow: 0, wet: 0 },
+      cloudy: { env: 'overcast', sun: 1.0, hemi: 0.6, envI: 0.9, fog: 0.0042, fogC: 0x9ea6ad, exp: 0.95, rain: 0, snow: 0, wet: 0 },
       rain: { env: 'overcast', sun: 0.5, hemi: 0.7, envI: 0.85, fog: 0.0075, fogC: 0x8b9298, exp: 1.0, rain: 1, snow: 0, wet: 1 },
       storm: { env: 'overcast', sun: 0.3, hemi: 0.55, envI: 0.6, fog: 0.009, fogC: 0x6c7379, exp: 0.95, rain: 1.6, snow: 0, wet: 1 },
       fog: { env: 'misty', sun: 0.7, hemi: 0.8, envI: 1.0, fog: 0.019, fogC: 0xb0b4b6, exp: 1.05, rain: 0, snow: 0, wet: 0.4 },
@@ -1035,4 +1051,61 @@ function makeNetTexture() {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(3, 3);
   return t;
+}
+
+// ───────── листя: пластини з процедурною текстурою ─────────
+let _foliage = null;
+function foliageMaterial() {
+  if (_foliage) return _foliage;
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const r = srand(4242);
+  const greens = [[52, 74, 30], [66, 92, 36], [80, 104, 44], [44, 62, 28], [92, 112, 52], [60, 84, 34]];
+  // густий центр + рвані краї
+  for (let i = 0; i < 2600; i++) {
+    const a = r() * Math.PI * 2, d = Math.pow(r(), 0.65) * 230;
+    const x = 256 + Math.cos(a) * d, y = 256 + Math.sin(a) * d * 0.92;
+    const [cr, cg, cb] = greens[Math.floor(r() * greens.length)];
+    const shade = 0.65 + (1 - d / 230) * 0.25 + r() * 0.25 - (y > 300 ? 0.15 : 0);
+    g.fillStyle = `rgb(${cr * shade | 0},${cg * shade | 0},${cb * shade | 0})`;
+    g.save(); g.translate(x, y); g.rotate(r() * Math.PI * 2);
+    const L = 7 + r() * 9;
+    g.beginPath(); g.ellipse(0, 0, L, L * 0.42, 0, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  // гілочки
+  g.strokeStyle = 'rgba(60,45,30,0.6)'; g.lineWidth = 2;
+  for (let i = 0; i < 14; i++) { g.beginPath(); g.moveTo(256, 300); g.lineTo(256 + (r() - 0.5) * 300, 256 + (r() - 0.5) * 300); g.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  _foliage = patchWeather(new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85 }), true);
+  return _foliage;
+}
+// Набір перехресних пластин в еліпсоїді з «сферичними» нормалями (об'ємне освітлення крони)
+function crownGeometry(n, seed, flat = false) {
+  const r = srand(seed * 999 + 1);
+  const pos = [], nor = [], uv = [];
+  for (let i = 0; i < n; i++) {
+    const a = r() * Math.PI * 2, el = flat ? 0 : (r() - 0.35) * 1.2, d = flat ? r() * 0.6 : Math.pow(r(), 0.5) * 0.85;
+    const cx = Math.cos(a) * Math.cos(el) * d, cy = Math.sin(el) * d * 0.8, cz = Math.sin(a) * Math.cos(el) * d;
+    const s = flat ? 0.9 : 0.9 + r() * 0.6;
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(flat ? 0 : (r() - 0.5) * 2.4, r() * Math.PI * 2, flat ? 0 : (r() - 0.5) * 1.2));
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+    for (const [u, v] of corners) {
+      const p = new THREE.Vector3(u * s * 0.5, v * s * 0.5, 0).applyQuaternion(q).add(new THREE.Vector3(cx, cy, cz));
+      if (flat) p.y = Math.max(-0.05, p.y);
+      pos.push(p.x, p.y, p.z);
+      const nn = new THREE.Vector3(p.x, flat ? 1 : p.y + 0.35, p.z).normalize();
+      nor.push(nn.x, nn.y, nn.z);
+      uv.push((u + 1) / 2, (v + 1) / 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.computeBoundingSphere();
+  return geo;
 }

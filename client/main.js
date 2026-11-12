@@ -46,7 +46,6 @@ const G = {
 window.G = G;
 
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: false, powerPreference: 'high-performance' });
-window.__r = renderer;
 const audio = (G.audio = new Audio());
 const ui = new UI(G);
 $('lobby-status').textContent = 'Завантаження ресурсів… 0%';
@@ -54,7 +53,6 @@ await loadAssets(renderer, (p) => { $('lobby-status').textContent = `Заван�
 $('lobby-status').textContent = 'Побудова світу…';
 await new Promise((r) => setTimeout(r, 30));
 const world = new World($('gl'), settings.quality, renderer);
-window.__w = world;
 const fx = new FX(world);
 world.onThunder = () => setTimeout(() => audio.play('thunder'), 300 + Math.random() * 1500);
 G.applySettings({});
@@ -98,8 +96,6 @@ function onMsg(m) {
     case 'msg': ui.feed(m.text, m.color); break;
     case 'respawn': {
       me.x = m.x; me.z = m.z; me.vx = me.vz = 0;
-      const tp = params.get('tp'); // налагодження: ?tp=x,z
-      if (tp) { const [tx, tz] = tp.split(',').map(Number); me.x = tx; me.z = tz; }
       break;
     }
   }
@@ -789,7 +785,7 @@ function drawOverlay(dt) {
   if (hurtFlash > 0) {
     hurtFlash = Math.max(0, hurtFlash - dt * 2);
     const g = octx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.7);
-    g.addColorStop(0, 'rgba(255,0,30,0)'); g.addColorStop(1, `rgba(255,0,30,${hurtFlash * 0.5})`);
+    g.addColorStop(0, 'rgba(160,0,0,0)'); g.addColorStop(1, `rgba(160,0,0,${hurtFlash * 0.3})`);
     octx.fillStyle = g; octx.fillRect(0, 0, W, H);
   }
 }

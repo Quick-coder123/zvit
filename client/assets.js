@@ -5,7 +5,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 const TEX = ['leafy_grass', 'withered_grass', 'brown_mud_02', 'muddy_tracks', 'snow_02', 'dry_ground_01', 'asphalt_02', 'rubble',
   'concrete_wall_004', 'rough_plaster_broken', 'plaster_brick_01', 'green_metal_rust', 'rusty_metal_02', 'denim_fabric', 'bark_brown_02'];
-const GLB = ['dead_tree_trunk_02', 'shrub_02', 'shrub_04', 'rock_07', 'stone_01', 'tree_stump_01', 'grass_medium_01',
+const GLB = ['dead_tree_trunk_02', 'rock_07', 'stone_01', 'tree_stump_01',
   'concrete_road_barrier', 'concrete_road_barrier_02', 'covered_car', 'old_tyre', 'street_lamp_01', 'old_military_crate',
   'wooden_military_crate', 'ammo_box', 'metal_jerrycan_green', 'barrel_03', 'portable_generator', 'cement_bag'];
 const HDR = ['clear', 'overcast', 'misty', 'winter'];
@@ -44,9 +44,6 @@ export async function loadAssets(renderer, onProgress) {
       A.glb[id] = { geo, mat, box: geo.boundingBox };
     }).catch((e) => console.warn('glb', id, e)));
   }
-  for (const id of ['shrub_02', 'shrub_04', 'grass_medium_01']) {
-    jobs.push(tl.loadAsync(`assets/alpha/${id}.png`).then((t) => { A.alpha[id] = t; }).catch(() => {}));
-  }
   for (const id of HDR) {
     jobs.push(hl.loadAsync(`assets/hdri/${id}.hdr`).then((t) => {
       t.mapping = THREE.EquirectangularReflectionMapping;
@@ -54,8 +51,6 @@ export async function loadAssets(renderer, onProgress) {
     }).catch(() => {}));
   }
   await Promise.all(jobs);
-  // листя: маска прозорості
-  for (const id of Object.keys(A.alpha)) if (A.glb[id]) { const m = A.glb[id].mat; m.alphaMap = A.alpha[id]; m.alphaTest = 0.5; m.transparent = false; m.side = 2; m.needsUpdate = true; }
   // мішки з піском замість цементних
   if (A.glb.cement_bag) {
     const m = A.glb.cement_bag.mat;

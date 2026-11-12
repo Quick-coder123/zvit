@@ -19,7 +19,7 @@ export const TEXTURES = [
   'green_metal_rust', 'rusty_metal_02', 'denim_fabric', 'bark_brown_02',
 ];
 export const MODELS = [
-  'dead_tree_trunk_02', 'shrub_02', 'shrub_04', 'rock_07', 'stone_01', 'tree_stump_01', 'grass_medium_01',
+  'dead_tree_trunk_02', 'rock_07', 'stone_01', 'tree_stump_01',
   'concrete_road_barrier', 'concrete_road_barrier_02', 'covered_car', 'old_tyre', 'street_lamp_01',
   'old_military_crate', 'wooden_military_crate', 'ammo_box', 'metal_jerrycan_green', 'barrel_03',
   'portable_generator', 'cement_bag',
@@ -57,12 +57,5 @@ for (const id of MODELS) {
   const g = f.gltf[RES].gltf;
   await dl(g.url, path.join(ROOT, 'models', id, `${id}.gltf`), g.size);
   for (const [rel, inc] of Object.entries(g.include || {})) await dl(inc.url, path.join(ROOT, 'models', id, rel), inc.size);
-}
-// маски прозорості для рослин (у 1k-glTF листя без альфа-каналу)
-for (const id of ['shrub_02', 'shrub_04', 'grass_medium_01']) {
-  const f = await j(`https://api.polyhaven.com/files/${id}`);
-  const m = f.Alpha || f.Mask;
-  const e = m[RES].png || m[RES].jpg;
-  await dl(e.url, path.join(ROOT, 'alpha', `${id}.png`), e.size);
 }
 console.log(`${DRY ? 'Буде завантажено' : 'Готово'}: ${(total / 1048576).toFixed(1)} МБ`);
