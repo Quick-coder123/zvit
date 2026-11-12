@@ -2,7 +2,7 @@
 import {
   TOWERS, TOWER_TYPES, TOWER_MAX_LVL, towerStats, towerUpgradeCost, RESEARCH, researchCost, TALENTS, BRANCHES,
   RARITIES, SLOTS, AFFIXES, itemValue, itemSalvage, itemPower, xpToNext, ABILITIES, fmt, DIFFICULTY, heroStats,
-  EXTRACTOR_COST, extractorUpgradeCost, extractorRate, ENEMIES, SEASONS, WEATHER,
+  EXTRACTOR_COST, extractorUpgradeCost, extractorRate, ENEMIES, SEASONS, WEATHER, TARGET_MODES, TARGET_MODE_NAMES, waveSummary,
 } from '/shared/data.js';
 import { QUALITY } from './scene.js';
 
@@ -95,10 +95,17 @@ export class UI {
       const m = Math.floor(s.timer / 60), sec = String(s.timer % 60).padStart(2, '0');
       ph.textContent = `Підготовка · напад через ${m}:${sec}`;
       ph.classList.remove('attack');
+      if (this._nwFor !== s.wave) {
+        this._nwFor = s.wave;
+        const sum = waveSummary(s.wave).sort((a, b) => b.isNew - a.isNew || b.n - a.n);
+        $('next-wave').innerHTML = 'Розвідка: ' + sum.map((x) => `<span class="${x.isNew ? 'nw-new' : ''}">${x.isNew ? 'НОВЕ: ' : ''}${ENEMIES[x.kind].name}${ENEMIES[x.kind].boss ? '' : ' ×' + x.n}</span>`).join(' · ');
+      }
+      $('next-wave').classList.remove('hidden');
       $('ready-btn').classList.remove('hidden');
     } else {
       ph.textContent = `АТАКА · ворогів лишилось: ${s.left}`;
       ph.classList.add('attack');
+      $('next-wave').classList.add('hidden');
       $('ready-btn').classList.add('hidden');
     }
     const meP = s.players.find((p) => p.n === G.name);
@@ -185,7 +192,7 @@ export class UI {
     const thrift = G.me ? G.me.stats.thrift : 0;
     const cost = Math.round(towerUpgradeCost(t.type, t.level) * (1 - thrift));
     const row = (n, a, b, f = (v) => fmt(v)) => `<div class="st"><span>${n}</span><span><b>${f(a)}</b>${b != null && f(b) !== f(a) ? ` <i>→ ${f(b)}</i>` : ''}</span></div>`;
-    const key = `${t.id}|${t.level}|${cost}|${G.snap?.credits >= cost}`;
+    const key = `${t.id}|${t.level}|${cost}|${G.snap?.credits >= cost}|${t.mode}`;
     if (this._tpKey === key) return;
     this._tpKey = key;
     $('tower-panel').innerHTML = `<h3 style="color:${hex(d.color)}">${d.name}</h3><div style="color:var(--dim);margin-bottom:8px">Рівень ${t.level} / ${TOWER_MAX_LVL}</div>
@@ -200,10 +207,13 @@ export class UI {
       <div class="row2">
         <button id="tp-up" ${max || G.snap?.credits < cost ? 'disabled' : ''}>${max ? 'Максимум' : `Покращити ₴ ${fmt(cost)}`} <kbd>U</kbd></button>
       </div>
+      <div style="margin-top:10px;color:var(--dim);font-size:12px">Наведення на ціль</div>
+      <div class="modes">${TARGET_MODES.map((m) => `<button data-mode="${m}" class="${(t.mode || 'first') === m ? 'on' : ''}">${TARGET_MODE_NAMES[m]}</button>`).join('')}</div>
       <div class="row2"><button id="tp-sell">Продати ₴ ${fmt(Math.round(t.spent * 0.7))}</button><button id="tp-close">Закрити</button></div>`;
     $('tp-up').onclick = () => { G.send({ t: 'upgrade', id: t.id }); };
     $('tp-sell').onclick = () => { G.send({ t: 'sell', id: t.id }); this.selectTower(null); G.audio.play('sell'); };
     $('tp-close').onclick = () => this.selectTower(null);
+    document.querySelectorAll('#tower-panel [data-mode]').forEach((b) => (b.onclick = () => { G.send({ t: 'tmode', id: t.id, mode: b.dataset.mode }); G.audio.play('ui'); }));
   }
 
   // ───── Великі панелі ─────

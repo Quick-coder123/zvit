@@ -99,6 +99,7 @@ class Particles {
   }
 }
 
+const _t = new THREE.Vector3();
 const TRACER = { hero: 0xffc070, bullet: 0xffb050, aa: 0xffd890, ebullet: 0xff8060 };
 
 export class FX {
@@ -130,6 +131,16 @@ export class FX {
     this.decalGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     this.decals = [];
   }
+  // пул сіток: снаряди й трасери не створюються заново на кожен постріл
+  mesh(geo, mat) {
+    const key = geo.uuid + mat.uuid;
+    const list = (this._pool ||= {})[key] ||= [];
+    let m = list.pop();
+    if (!m) { m = new THREE.Mesh(geo, mat); m.userData.poolKey = key; this.scene.add(m); }
+    m.visible = true; m.scale.set(1, 1, 1);
+    return m;
+  }
+  release(m) { m.visible = false; this._pool[m.userData.poolKey].push(m); }
   emit(x, y, z, color, count, o = {}) { this.add.emit(x, y, z, color, Math.max(1, Math.round(count * this.mul)), o); }
   puff(x, y, z, color, count, o = {}) { this.smoke.emit(x, y, z, color, Math.max(1, Math.round(count * this.mul)), o); }
 
@@ -146,25 +157,24 @@ export class FX {
     const k = ev.k;
     let m;
     if (TRACER[k]) {
-      m = new THREE.Mesh(this.tracerGeo, this.tracerMat(k === 'hero' ? 0xffd080 : TRACER[k]));
+      m = this.mesh(this.tracerGeo, this.tracerMat(k === 'hero' ? 0xffd080 : TRACER[k]));
       m.scale.z = k === 'aa' ? 3.5 : 2.6;
     } else if (k === 'atgm' || k === 'rocket') {
-      m = new THREE.Mesh(this.missileGeo, this.shellMat);
+      m = this.mesh(this.missileGeo, this.shellMat);
     } else {
-      m = new THREE.Mesh(this.shellGeo, this.shellMat);
+      m = this.mesh(this.shellGeo, this.shellMat);
       if (k === 'agsg') m.scale.setScalar(0.6);
     }
     m.position.set(ev.p[0], ev.p[1], ev.p[2]);
     const v = new THREE.Vector3(...ev.v);
-    if (v.lengthSq() > 0) m.lookAt(m.position.clone().add(v));
-    this.scene.add(m);
+    if (v.lengthSq() > 0) m.lookAt(_t.copy(m.position).add(v));
     this.projectiles.set(ev.id, { m, v, g: ev.g || 0, ttl: ev.ttl + 0.1, k });
     if (k === 'atgm' || k === 'rocket') this.puff(ev.p[0], ev.p[1], ev.p[2], 0xc8c4bc, 6, { speed: 2, life: 1.2, size: 0.8, size1: 2.5, alpha: 0.5, up: 0.6 });
   }
   endProjectile(ev) {
     const p = this.projectiles.get(ev.id);
     if (!p) return;
-    this.scene.remove(p.m);
+    this.release(p.m);
     this.projectiles.delete(ev.id);
     const pos = p.m.position;
     if (p.k === 'mortar' || p.k === 'shell' || p.k === 'agsg' || p.k === 'rocket') return; // окремий вибух
@@ -243,9 +253,8 @@ export class FX {
     for (let i = 0; i < n; i++) this.tracer(from, to, TRACER.ebullet, i * 0.07);
   }
   tracer(from, to, color, delay = 0) {
-    const m = new THREE.Mesh(this.tracerGeo, this.tracerMat(color));
+    const m = this.mesh(this.tracerGeo, this.tracerMat(color));
     m.scale.z = 2.5; m.visible = false;
-    this.scene.add(m);
     const len = from.distanceTo(to);
     this.tracers.push({ m, from: from.clone(), to: to.clone(), t: -delay, dur: Math.max(0.05, len / 120) });
   }
@@ -258,19 +267,19 @@ export class FX {
       p.ttl -= dt;
       p.m.position.x += p.v.x * dt; p.m.position.y += p.v.y * dt - 0.5 * p.g * dt * dt; p.m.position.z += p.v.z * dt;
       p.v.y -= p.g * dt;
-      if (p.g) p.m.lookAt(p.m.position.clone().add(p.v));
+      if (p.g) p.m.lookAt(_t.copy(p.m.position).add(p.v));
       if (p.k === 'atgm' || p.k === 'rocket') {
         this.emit(p.m.position.x, p.m.position.y, p.m.position.z, 0xffb060, 1, { speed: 0.2, life: 0.08, size: 0.5 });
         this.puff(p.m.position.x, p.m.position.y, p.m.position.z, 0xbdb8ae, 1, { speed: 0.3, life: 1.6, size: 0.4, size1: 1.6, alpha: 0.45, up: 0.3 });
       }
-      if (p.ttl <= 0) { this.scene.remove(p.m); this.projectiles.delete(id); }
+      if (p.ttl <= 0) { this.release(p.m); this.projectiles.delete(id); }
     }
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
       t.t += dt;
       if (t.t < 0) continue;
       const k = t.t / t.dur;
-      if (k >= 1) { this.scene.remove(t.m); this.tracers.splice(i, 1); continue; }
+      if (k >= 1) { this.release(t.m); this.tracers.splice(i, 1); continue; }
       t.m.visible = true;
       t.m.position.copy(t.from).lerp(t.to, k);
       t.m.lookAt(t.to);

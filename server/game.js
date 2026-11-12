@@ -7,7 +7,7 @@ import {
   DIFFICULTY, waveHpMul, waveDmgMul, bountyMul, waveComposition, wildStats, towerStats, towerUpgradeCost,
   canBuildAt, snap, EXTRACTOR_COST, extractorUpgradeCost, extractorRate, RESEARCH, researchCost,
   TALENTS, xpToNext, heroStats, newHeroProfile, genItem, itemValue, itemSalvage, ABILITIES, HERO_COLORS, SLOTS,
-  SEASONS, seasonOf, WEATHER, SEASON_WEATHER,
+  SEASONS, seasonOf, WEATHER, SEASON_WEATHER, TARGET_MODES, bossScale,
 } from '../shared/data.js';
 
 const SAVE_VERSION = 2;
@@ -74,7 +74,7 @@ export class Game {
     if (!this.running) return;
     // зберегти профілі онлайн-гравців
     for (const p of this.clients.values()) if (p.profile) this.w.heroes[p.name] = p.profile;
-    this.w.towers = [...this.towers.values()].map((t) => ({ type: t.type, level: t.level, x: t.x, z: t.z, spent: t.spent }));
+    this.w.towers = [...this.towers.values()].map((t) => ({ type: t.type, level: t.level, x: t.x, z: t.z, spent: t.spent, mode: t.mode }));
     this.w.savedAt = Date.now();
     const tmp = this.savePath + '.tmp';
     const data = JSON.stringify(this.w);
@@ -93,7 +93,7 @@ export class Game {
       if (cfg.prepTime) this.w.cfg.prepTime = clampPrep(cfg.prepTime);
     } else this.newWorld(cfg);
     this.towers = new Map();
-    for (const t of this.w.towers) this.addTower(t.type, t.x, t.z, t.level, t.spent);
+    for (const t of this.w.towers) this.addTower(t.type, t.x, t.z, t.level, t.spent).mode = t.mode || 'first';
     this.enemies = new Map();
     this.projectiles = new Map();
     this.loot = new Map();
@@ -161,6 +161,7 @@ export class Game {
       case 'build': this.build(h, m.type, m.x, m.z); break;
       case 'upgrade': this.upgradeTower(h, m.id); break;
       case 'sell': this.sellTower(h, m.id); break;
+      case 'tmode': { const t = this.towers.get(m.id); if (t && TARGET_MODES.includes(m.mode)) { t.mode = m.mode; this.broadcastWorld(); } break; }
       case 'extract': this.extract(h, m.id); break;
       case 'research': this.research(h, m.id); break;
       case 'talent': this.talent(h, m.id); break;
@@ -215,7 +216,7 @@ export class Game {
   worldMsg() {
     return {
       t: 'world',
-      towers: [...this.towers.values()].map((t) => ({ id: t.id, type: t.type, level: t.level, x: t.x, z: t.z, spent: t.spent })),
+      towers: [...this.towers.values()].map((t) => ({ id: t.id, type: t.type, level: t.level, x: t.x, z: t.z, spent: t.spent, mode: t.mode || 'first' })),
       extractors: this.w.extractors,
       research: this.w.research,
       camps: this.w.camps,
@@ -455,7 +456,7 @@ export class Game {
   spawnWaveEnemy(kind, lane) {
     const w = this.w.wave, diff = this.w.cfg.difficulty;
     const d = ENEMIES[kind];
-    const hm = waveHpMul(w, diff) * (d.boss ? 1 + 0.25 * Math.floor(w / 30) : 1);
+    const hm = waveHpMul(w, diff) * (d.boss ? bossScale(w) : 1);
     const p = PORTALS[lane];
     const off = (rand() - 0.5) * 3.2;
     const e = this.spawnEnemy(kind, p[0] + (rand() - 0.5) * 2, p[1] + (rand() - 0.5) * 2, {
@@ -760,31 +761,12 @@ export class Game {
 
       if (e.wild) { this.wildAI(e, def, sp, dt, players); continue; }
 
-      // рух по дорозі
-      let tx, tz;
-      if (e.flying) { tx = 0; tz = 0; }
-      else {
-        const lane = LANES[e.lane];
-        const wp = lane[Math.min(e.wp, lane.length - 1)];
-        // бічний зсув
-        const prev = lane[e.wp - 1];
-        const dx = wp[0] - prev[0], dz = wp[1] - prev[1], dl = Math.hypot(dx, dz) || 1;
-        tx = wp[0] + (-dz / dl) * e.off; tz = wp[1] + (dx / dl) * e.off;
-        if (Math.hypot(tx - e.x, tz - e.z) < 1.2 && e.wp < lane.length - 1) e.wp++;
-      }
-      const dx = tx - e.x, dz = tz - e.z, d = Math.hypot(dx, dz);
-      const reach = e.flying ? 6 + e.size : 2 + e.size * 0.3;
-      if ((e.flying && d < reach) || (!e.flying && e.wp >= LANES[e.lane].length - 1 && d < 1.5)) {
+      // рух по дорозі: витрачаємо весь крок, переносячи залишок через точки маршруту
+      if (this.moveAlongLane(e, sp * dt)) {
         this.coreHp -= e.coreDmg;
         this.enemies.delete(e.id);
         this.events.push({ e: 'core', x: r1(e.x), z: r1(e.z), k: e.ki });
         continue;
-      }
-      if (d > 0.01) {
-        const step = Math.min(d, sp * dt);
-        e.x += (dx / d) * step; e.z += (dz / d) * step;
-        e.prog += step;
-        e.rot = Math.atan2(dx, dz);
       }
       // ближній бій з героями
       if (def.melee && e.atkCd <= 0) {
@@ -837,6 +819,42 @@ export class Game {
       }
     }
     void w; void diff;
+  }
+
+  // Повертає true, якщо ворог дійшов до штабу. Залишок відстані переноситься через повороти,
+  // тож швидкі вороги не втрачають час на кожній точці й не проскакують її.
+  laneTarget(e) {
+    const lane = LANES[e.lane];
+    const wp = lane[e.wp], prev = lane[e.wp - 1];
+    const dx = wp[0] - prev[0], dz = wp[1] - prev[1], dl = Math.hypot(dx, dz) || 1;
+    return [wp[0] + (-dz / dl) * e.off, wp[1] + (dx / dl) * e.off];
+  }
+  moveAlongLane(e, dist) {
+    if (e.flying) {
+      const d = Math.hypot(e.x, e.z), reach = 6 + e.size;
+      if (d - dist <= reach) return true;
+      e.x -= (e.x / d) * dist; e.z -= (e.z / d) * dist;
+      e.prog += dist;
+      e.rot = Math.atan2(-e.x, -e.z);
+      return false;
+    }
+    const last = LANES[e.lane].length - 1;
+    let remaining = dist;
+    for (let guard = 0; remaining > 1e-6 && guard < 16; guard++) {
+      const [tx, tz] = this.laneTarget(e);
+      const dx = tx - e.x, dz = tz - e.z, d = Math.hypot(dx, dz);
+      if (d > remaining) {
+        e.x += (dx / d) * remaining; e.z += (dz / d) * remaining;
+        e.prog += remaining;
+        e.rot = Math.atan2(dx, dz);
+        return false;
+      }
+      e.x = tx; e.z = tz; e.prog += d; remaining -= d;
+      if (d > 1e-6) e.rot = Math.atan2(dx, dz);
+      if (e.wp >= last) return true;
+      e.wp++;
+    }
+    return false;
   }
 
   wildAI(e, def, sp, dt, players) {
@@ -899,14 +917,16 @@ export class Game {
       const range = st.range * this.wx().range;
       // цілі — найдальше просунуті вороги в радіусі
       const cands = [];
+      const mode = t.mode || 'first';
       for (const e of this.enemies.values()) {
         if (e.wild) continue;
         if (def.ground && e.flying) continue;
         const d = Math.hypot(e.x - t.x, e.z - t.z);
         if (d > range || (def.minRange && d < def.minRange)) continue;
-        let score = e.prog + (e.boss ? 1000 : 0);
-        if (def.airMul && e.flying) score += 500;
-        if (def.heavyMul && ENEMIES[e.kind].vehicle) score += 300;
+        let score = mode === 'last' ? -e.prog : mode === 'strongest' ? e.hp + e.shield : mode === 'weakest' ? -(e.hp + e.shield) : mode === 'closest' ? -d : e.prog;
+        // спеціалізація позиції: ППО — повітря, ПТРК — техніка (поверх режиму)
+        if (def.airMul && e.flying) score += 1e7;
+        if (def.heavyMul && ENEMIES[e.kind].vehicle) score += 1e7;
         cands.push([score, e]);
       }
       if (!cands.length) { t.target = -1; continue; }

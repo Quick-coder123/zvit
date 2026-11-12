@@ -55,6 +55,19 @@ await new Promise((r) => setTimeout(r, 30));
 const world = new World($('gl'), settings.quality, renderer);
 const fx = new FX(world);
 world.onThunder = () => setTimeout(() => audio.play('thunder'), 300 + Math.random() * 1500);
+// прогрів шейдерів: компілюємо всі матеріали наперед, щоб перший вибух чи новий ворог не давав ривка
+{
+  $('lobby-status').textContent = 'Підготовка шейдерів…';
+  const warm = new THREE.Group();
+  for (const k of ENEMY_KINDS) warm.add(makeEnemy(k));
+  for (const t of TOWER_TYPES) { const o = makeTower(t); setTowerLevel(o, 16); warm.add(o); }
+  warm.add(makeHero(0xffffff), makeLoot(4), makeGhost('mg'), makeDrone());
+  const burnt = makeEnemy('tank'); burnt.traverse((o) => { if (o.isMesh) o.material = burntMaterial(); }); warm.add(burnt);
+  world.scene.add(warm);
+  fx.explosion(0, 0, 1, 0.1); fx.eshot([0, 0], [1, 1], 1, 'mg'); fx.spawnProjectile({ id: -1, k: 'atgm', p: [0, -5, 0], v: [0, 0, 1], ttl: 0.01 });
+  try { renderer.compile(world.scene, world.camera); } catch (e) { console.warn(e); }
+  world.scene.remove(warm);
+}
 G.applySettings({});
 const overlay = $('overlay');
 const octx = overlay.getContext('2d');

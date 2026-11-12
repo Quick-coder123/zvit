@@ -9,7 +9,8 @@
     "start": "electron .",
     "server": "node server/standalone.js",
     "dist": "node scripts/vendor-three.mjs && electron-builder --win portable zip",
-    "postinstall": "node scripts/vendor-three.mjs"
+    "postinstall": "node scripts/vendor-three.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "three": "0.170.0",

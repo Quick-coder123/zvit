@@ -86,9 +86,36 @@ export const DIFFICULTY = {
   hard: { name: 'Жорстко', growth: 1.106, hp: 1.25, dmg: 1.3, bounty: 0.9 },
 };
 // Сила хвилі залежить ЛИШЕ від номера хвилі і складності, а не від гравців.
+// Ритм: сплеск — передишка — сплеск. Після важкої цілі легша хвиля, кожна 5-та — трохи важча.
+export function wavePacing(w) {
+  if (w % 10 === 1 && w > 1) return 0.82;
+  if (w % 10 === 2 && w > 2) return 0.9;
+  if (w % 10 === 5) return 1.12;
+  if (w % 10 === 9) return 0.94;
+  return 1;
+}
 export function waveHpMul(w, diff) {
   const d = DIFFICULTY[diff] || DIFFICULTY.normal;
-  return d.hp * (1 + 0.1 * (w - 1)) * Math.pow(d.growth, w - 1);
+  return d.hp * (1 + 0.1 * (w - 1)) * Math.pow(d.growth, w - 1) * wavePacing(w);
+}
+// Важкі цілі: перші зустрічі м'якші (сплеск, а не стіна), далі повна сила і поступове наростання
+export function bossScale(w) {
+  const n = Math.floor(w / 10);
+  return [0.32, 0.45, 0.6, 0.75][n - 1] ?? 0.75 + 0.05 * (n - 4);
+}
+export const TARGET_MODES = ['first', 'last', 'strongest', 'weakest', 'closest'];
+export const TARGET_MODE_NAMES = { first: 'Перший', last: 'Останній', strongest: 'Найсильніший', weakest: 'Найслабший', closest: 'Найближчий' };
+// Який тип ворога вперше з'являється на хвилі w (для анонсу)
+const _firstSeen = {};
+export function waveSummary(w) {
+  const list = waveComposition(w);
+  const counts = {};
+  for (const k of list) counts[k] = (counts[k] || 0) + 1;
+  if (!_firstSeen.done) {
+    for (let i = 1; i <= 60; i++) for (const k of new Set(waveComposition(i))) if (!(k in _firstSeen)) _firstSeen[k] = i;
+    _firstSeen.done = true;
+  }
+  return Object.entries(counts).map(([k, n]) => ({ kind: k, n, isNew: _firstSeen[k] === w }));
 }
 export function waveDmgMul(w, diff) {
   const d = DIFFICULTY[diff] || DIFFICULTY.normal;
