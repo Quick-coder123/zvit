@@ -191,7 +191,7 @@ export function makeTower(type) {
   // індикатори рівня
   const pips = new THREE.Group();
   g.add(pips);
-  const auraRing = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.25, 6), new THREE.MeshBasicMaterial({ color: 0x3ae0ff, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+  const auraRing = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.15, 6), new THREE.MeshBasicMaterial({ color: 0x1a7a99, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }));
   auraRing.rotation.x = -Math.PI / 2;
   auraRing.position.y = 0.08;
   auraRing.visible = false;

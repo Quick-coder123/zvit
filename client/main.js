@@ -350,7 +350,7 @@ window.addEventListener('keydown', (e) => {
   if (code === 'Enter') { $('chat').classList.remove('hidden'); $('chat').focus(); return; }
   if (code === 'KeyK') return ui.openPanel('talents');
   if (code === 'KeyJ') return ui.openPanel('research');
-  if (code === 'KeyM') { $('bigmap').classList.toggle('hidden'); return; }
+  if (code === 'KeyM') { $('bigmap').classList.toggle('hidden'); drawMap($('bigmap-c'), 132); return; }
   if (code === 'KeyG') { G.send({ t: 'ready' }); return; }
   if (code === 'KeyF') { tryExtractor(); return; }
   if (code === 'KeyU' && ui.selTower) { G.send({ t: 'upgrade', id: ui.selTower }); return; }
@@ -737,7 +737,7 @@ function drawMap(cv, R = 132, focus = null) {
   // родовища
   DEPOSITS.forEach((d, i) => { const [x, z] = P(d.x, d.z); c.fillStyle = G.world.extractors[i]?.level ? '#c38cff' : 'rgba(195,140,255,.35)'; c.fillRect(x - 4, z - 4, 8, 8); });
   // табори
-  c.font = `${Math.max(9, 10 * S / 220)}px Bahnschrift, sans-serif`; c.textAlign = 'center';
+  c.font = `600 ${S > 300 ? 15 : 9}px Bahnschrift, sans-serif`; c.textAlign = 'center';
   CAMPS.forEach((cp, i) => { const [x, z] = P(cp.x, cp.z); c.fillStyle = ['#ff9944', '#ff6633', '#ff3366', '#ffcc22'][cp.tier]; c.beginPath(); c.arc(x, z, 3.5, 0, Math.PI * 2); c.fill(); if (S > 300) c.fillText(G.world.camps[i]?.level ?? '', x, z - 7); });
   // вежі
   for (const t of G.world.towers) { const [x, z] = P(t.x, t.z); c.fillStyle = hex(TOWERS[t.type].color); c.fillRect(x - 2, z - 2, 4, 4); }
@@ -779,6 +779,9 @@ function updatePrompt() {
 let last = performance.now(), fpsAcc = 0, fpsN = 0, panelAcc = 0, mapAcc = 0;
 function frame(now) {
   requestAnimationFrame(frame);
+  try { frameBody(now); } catch (e) { if (!frame.err) { frame.err = 1; console.error('frame error', e.message, e.stack); } }
+}
+function frameBody(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   const t = now / 1000;

@@ -628,7 +628,7 @@ export class World {
     this.buildCells = cells;
     const geo = new THREE.PlaneGeometry(GRID * 0.86, GRID * 0.86);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x3ae0ff, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending });
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1d8fb0, transparent: true, opacity: 0.07, depthWrite: false, blending: THREE.AdditiveBlending });
     const im = new THREE.InstancedMesh(geo, mat, cells.length);
     const m = new THREE.Matrix4();
     cells.forEach(([x, z], i) => { m.makeTranslation(x, 0.12, z); im.setMatrixAt(i, m); });
