@@ -24,6 +24,22 @@ let overCanvas = false;
 const DEFAULTS = { quality: 'high', vol: 0.5, music: 0.35, dmgNums: true, shakeStr: 0.8, noFlash: false, uiScale: 1, fps: false };
 let settings = { ...DEFAULTS };
 try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('bastion.settings') || '{}') }; } catch { /* */ }
+// RDP-сесія: за замовчуванням середня якість; безпечний режим після збою GPU — низька
+{
+  const q = new URLSearchParams(location.search);
+  const stored = (() => { try { return localStorage.getItem('bastion.settings'); } catch { return null; } })();
+  if (q.get('rdp') === '1' && !stored) settings.quality = 'medium';
+  if (q.get('safe') === '1') settings.quality = 'low';
+}
+// помилки — на екран, а не мовчки
+function showFatal(text) {
+  let el = document.getElementById('fatal');
+  if (!el) { el = document.createElement('div'); el.id = 'fatal'; document.body.appendChild(el); }
+  el.innerHTML = `<b>Сталася помилка</b><div>${String(text).replace(/</g, '&lt;')}</div><small>Натисніть F12 і надішліть знімок вкладки Console розробнику. Esc — закрити.</small>`;
+  el.onclick = () => el.remove();
+}
+window.addEventListener('error', (e) => showFatal(e.message + (e.filename ? ` (${e.filename.split('/').pop()}:${e.lineno})` : '')));
+window.addEventListener('unhandledrejection', (e) => showFatal(e.reason && (e.reason.stack || e.reason.message) || e.reason));
 
 const G = {
   name: null, host: false, me: null, snap: null,
@@ -54,6 +70,8 @@ const G = {
 window.G = G;
 
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: false, powerPreference: 'high-performance' });
+$('gl').addEventListener('webglcontextlost', (e) => { e.preventDefault(); showFatal('Відеокарта скинула WebGL-контекст (перевантаження або збій драйвера). Гра спробує відновитися; якщо ні — знизьте якість у налаштуваннях.'); });
+$('gl').addEventListener('webglcontextrestored', () => { const f = document.getElementById('fatal'); if (f) f.remove(); });
 const audio = (G.audio = new Audio());
 const ui = new UI(G);
 $('lobby-status').textContent = 'Завантаження ресурсів… 0%';
@@ -905,7 +923,7 @@ function updatePrompt() {
 let last = performance.now(), fpsAcc = 0, fpsN = 0, panelAcc = 0, mapAcc = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  try { frameBody(now); } catch (e) { if (!frame.err) { frame.err = 1; console.error('frame error', e.message, e.stack); } }
+  try { frameBody(now); } catch (e) { if (!frame.err) { frame.err = 1; console.error('frame error', e.message, e.stack); showFatal(e.stack || e.message); } }
 }
 function frameBody(now) {
   const dt = Math.min(0.1, (now - last) / 1000);

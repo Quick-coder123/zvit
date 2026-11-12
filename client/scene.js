@@ -204,6 +204,7 @@ export class World {
     }
   }
   flash(x, y, z, color, intensity = 60, life = 0.2) {
+    y += 1.2; // світло не впритул до поверхні: 1/d² біля нуля дає переповнення
     if (this.noFlash) intensity *= 0.25;
     const l = this.flashLights.find((f) => f.userData.life <= 0) || this.flashLights.reduce((a, b) => (a.userData.life < b.userData.life ? a : b));
     l.position.set(x, y, z);
@@ -823,6 +824,16 @@ export class World {
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    // санітарний прохід: Inf/NaN (переповнення half-float на справжніх GPU) не повинні потрапити в bloom
+    this.composer.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        void main(){ vec4 c = texture2D(tDiffuse, vUv);
+          bvec3 bad = bvec3(c.r != c.r || c.r > 6.0e4, c.g != c.g || c.g > 6.0e4, c.b != c.b || c.b > 6.0e4);
+          vec3 col = any(bad) ? vec3(0.0) : clamp(c.rgb, 0.0, 48.0);
+          gl_FragColor = vec4(col, 1.0); }`,
+    }));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.35, 0.4, 0.95);
     this.composer.addPass(this.bloom);
     // кольорокорекція «плівки» в лінійному просторі, перед OutputPass (тонмапінг + sRGB)

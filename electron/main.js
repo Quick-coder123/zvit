@@ -1,5 +1,6 @@
 // Electron: перша копія гри на комп'ютері стає сервером, інші підключаються до неї.
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,14 @@ const port = +(process.argv.find((a) => a.startsWith('--port=')) || '').slice(7)
 const saveDir = path.join(process.env.PROGRAMDATA || app.getPath('userData'), 'LastLine');
 
 let srv = null;
+let safeMode = process.argv.includes('--safe');
+// Діагностика збоїв: лог у спільній папці + перезапуск у безпечному режимі графіки
+function crashLog(what, details) {
+  try {
+    fs.mkdirSync(saveDir, { recursive: true });
+    fs.appendFileSync(path.join(saveDir, 'crash.log'), `[${new Date().toISOString()}] ${process.env.USERNAME || ''} ${what}: ${JSON.stringify(details)}\n`);
+  } catch { /* ignore */ }
+}
 let win = null;
 
 async function tryHost(autoContinue = false) {
@@ -37,7 +46,8 @@ function gameUrl() {
   const host = remoteHost || '127.0.0.1';
   let user = 'Гравець';
   try { user = os.userInfo().username; } catch { /* ignore */ }
-  return `http://${host}:${port}/?user=${encodeURIComponent(user)}${srv ? '&hosting=1' : ''}`;
+  const rdp = /^RDP-/i.test(process.env.SESSIONNAME || '') ? '&rdp=1' : '';
+  return `http://${host}:${port}/?user=${encodeURIComponent(user)}${srv ? '&hosting=1' : ''}${rdp}${safeMode ? '&safe=1' : ''}`;
 }
 
 async function createWindow() {
@@ -53,6 +63,12 @@ async function createWindow() {
   });
   win.maximize();
   win.loadURL(gameUrl());
+  win.webContents.on('render-process-gone', (_e, details) => {
+    crashLog('render-process-gone', details);
+    safeMode = true;
+    setTimeout(() => win && !win.isDestroyed() && win.loadURL(gameUrl()), 800);
+  });
+  win.webContents.on('unresponsive', () => crashLog('unresponsive', {}));
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') { win.setFullScreen(!win.isFullScreen()); e.preventDefault(); }
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
@@ -67,6 +83,13 @@ ipcMain.handle('bastion:reconnect', async () => {
 });
 ipcMain.handle('bastion:quit', () => app.quit());
 
+app.on('child-process-gone', (_e, details) => {
+  crashLog('child-process-gone', details);
+  if (details.type === 'GPU' && win && !win.isDestroyed() && !safeMode) {
+    safeMode = true;
+    setTimeout(() => win && !win.isDestroyed() && win.loadURL(gameUrl()), 1500);
+  }
+});
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { if (srv) { srv.close(); srv = null; } });
