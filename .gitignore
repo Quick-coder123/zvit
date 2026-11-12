@@ -5,3 +5,4 @@ saves/
 client/assets/models/
 release/
 client/vendor/
+.playwright-cli/

@@ -28,6 +28,7 @@ export function startServer({ port, saveDir, host = '0.0.0.0', autoContinue = fa
   const server = http.createServer((req, res) => {
     let url = decodeURIComponent((req.url || '/').split('?')[0]);
     if (url === '/') url = '/index.html';
+    if (url === '/favicon.ico') { res.writeHead(204); res.end(); return; }
     for (const [prefix, dir] of routes) {
       if (!url.startsWith(prefix)) continue;
       const file = path.normalize(path.join(dir, url.slice(prefix.length)));
