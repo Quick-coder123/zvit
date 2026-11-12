@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "server": "node server/standalone.js",
-    "dist": "electron-builder --win portable zip"
+    "dist": "node scripts/vendor-three.mjs && electron-builder --win portable zip",
+    "postinstall": "node scripts/vendor-three.mjs"
   },
   "dependencies": {
     "three": "0.170.0",
@@ -28,7 +29,8 @@
       "server/**",
       "shared/**",
       "client/**",
-      "package.json"
+      "package.json",
+      "!client/assets/models/**"
     ],
     "win": {
       "target": [

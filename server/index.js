@@ -17,7 +17,10 @@ function resolveThree() {
 
 export function startServer({ port, saveDir, host = '0.0.0.0', autoContinue = false }) {
   const three = resolveThree();
+  const jsmLocal = path.join(ROOT, 'client', 'vendor', 'jsm');
+  const jsm = fs.existsSync(jsmLocal) ? jsmLocal : path.join(three, 'examples', 'jsm');
   const routes = [
+    ['/vendor/jsm/', jsm + path.sep],
     ['/vendor/three/', three + path.sep],
     ['/shared/', path.join(ROOT, 'shared') + path.sep],
     ['/', path.join(ROOT, 'client') + path.sep],

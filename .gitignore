@@ -3,3 +3,5 @@ dist/
 saves/
 *.log
 client/assets/models/
+release/
+client/vendor/
