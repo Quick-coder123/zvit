@@ -1,20 +1,21 @@
-// 3D-світ: рендерер, пост-обробка, місцевість, небо, ядро, дороги, портали, декор.
+// Реалістичний світ: HDRI-освітлення, фотоскан-текстури, сезони, погода, лісосмуги, зруйноване місто, укріплена база.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { LANES, PORTALS, DEPOSITS, CAMPS, BASE_R, WORLD, distToLanes, canBuildAt, GRID } from '/shared/data.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { A, texRep } from './assets.js';
+import { LANES, DEPOSITS, CAMPS, BASE_R, distToLanes, canBuildAt, GRID, inCity, CITY } from '/shared/data.js';
 
 export const QUALITY = {
-  low: { name: 'Низька', shadows: 0, bloom: false, pr: 1, particles: 0.4, decor: 0.4 },
-  medium: { name: 'Середня', shadows: 1024, bloom: true, pr: 1, particles: 0.75, decor: 0.75 },
-  high: { name: 'Висока', shadows: 2048, bloom: true, pr: 1.25, particles: 1, decor: 1 },
-  ultra: { name: 'Ультра', shadows: 4096, bloom: true, pr: 2, particles: 1.3, decor: 1.3 },
+  low: { name: 'Низька', shadows: 0, bloom: false, pr: 1, particles: 0.5, trees: 0.45, grass: 0, rain: 0.5 },
+  medium: { name: 'Середня', shadows: 1024, bloom: false, pr: 1, particles: 0.75, trees: 0.7, grass: 200, rain: 0.75 },
+  high: { name: 'Висока', shadows: 2048, bloom: true, pr: 1, particles: 1, trees: 1, grass: 450, rain: 1 },
+  ultra: { name: 'Ультра', shadows: 4096, bloom: true, pr: 1.5, particles: 1.2, trees: 1.25, grass: 900, rain: 1.3 },
 };
 
-// детермінований шум
+// ───────── шум ─────────
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
 function vnoise(x, y) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
@@ -22,54 +23,138 @@ function vnoise(x, y) {
   const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
-export function fbm(x, y, o = 5) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += vnoise(x * f, y * f) * a; f *= 2; a *= 0.5; } return s; }
-function srand(seed) { let s = seed; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; }
+export function fbm(x, y, o = 4) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += vnoise(x * f, y * f) * a; f *= 2; a *= 0.5; } return s; }
+function srand(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; }
+const smooth = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+
+// ───────── кратери (детерміновані) ─────────
+export const CRATERS = [];
+{
+  const r = srand(777);
+  for (let i = 0; i < 70; i++) {
+    const a = r() * Math.PI * 2, d = BASE_R + 8 + r() * 85;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    const city = inCity(x, z);
+    if (r() > 0.35 + city * 0.6 && distToLanes(x, z) > 9) continue;
+    CRATERS.push({ x, z, r: 1.5 + r() * 2.8 });
+  }
+}
 
 export function terrainHeight(x, z) {
   const r = Math.hypot(x, z);
-  const edge = THREE.MathUtils.smoothstep(r, 112, 150);
-  const lane = Math.min(1, distToLanes(x, z) / 10);
-  const hills = (fbm(x * 0.02 + 10, z * 0.02 - 4, 4) - 0.35) * 2.2 * THREE.MathUtils.smoothstep(r, BASE_R + 6, BASE_R + 30) * lane;
-  return Math.max(0, hills) + edge * (16 + fbm(x * 0.03, z * 0.03, 4) * 36);
+  const flat = smooth(BASE_R + 4, BASE_R + 22, r) * Math.min(1, distToLanes(x, z) / 9);
+  let h = (fbm(x * 0.012 + 5, z * 0.012 - 3, 4) - 0.45) * 3.2 * flat;
+  h *= 1 - inCity(x, z) * 0.85;
+  h += smooth(122, 160, r) * (6 + fbm(x * 0.03, z * 0.03, 3) * 10);
+  for (const c of CRATERS) {
+    const d = Math.hypot(x - c.x, z - c.z);
+    if (d < c.r * 1.3) { const k = d / c.r; h += k < 1 ? -(1 - k * k) * c.r * 0.28 : (1.3 - k) * 0.6; }
+  }
+  return h;
 }
 
+// ───────── спільні уніформи погоди для всіх матеріалів ─────────
+export const WXU = { uSnow: { value: 0 }, uWet: { value: 0 }, uAutumn: { value: 0 }, uSpring: { value: 0 }, uDry: { value: 0 } };
+const patchedMats = new WeakSet();
+export function patchWeather(mat, veg = false) {
+  if (patchedMats.has(mat)) return mat;
+  patchedMats.add(mat);
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    Object.assign(sh.uniforms, WXU);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uSnow, uWet, uAutumn, uSpring, uDry;')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 wN = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+          ${veg ? `float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+          vec3 autumnC = lum * vec3(2.3, 1.25, 0.35);
+          diffuseColor.rgb = mix(diffuseColor.rgb, autumnC, uAutumn);
+          diffuseColor.rgb *= mix(vec3(1.0), vec3(1.08, 1.15, 0.85), uSpring);
+          diffuseColor.rgb = mix(diffuseColor.rgb, lum * vec3(1.35, 1.2, 0.6), uDry * 0.35);` : ''}
+          float sCover = uSnow * smoothstep(0.45, 0.8, wN.y);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.92, 0.96), sCover);
+          diffuseColor.rgb *= 1.0 - uWet * 0.28 * (1.0 - sCover);
+          roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.45, uWet * (1.0 - sCover));
+          roughnessFactor = mix(roughnessFactor, 0.75, sCover);
+        }`);
+  };
+  mat.customProgramCacheKey = () => (veg ? 'wxveg' : 'wx') + (mat.alphaTest || 0);
+  return mat;
+}
+
+function pbr(id, rep, opts = {}) {
+  const m = new THREE.MeshStandardMaterial({
+    map: texRep(id, 'diff', rep), normalMap: texRep(id, 'nor', rep), roughnessMap: texRep(id, 'rough', rep),
+    roughness: 1, metalness: 0, ...opts,
+  });
+  return patchWeather(m);
+}
+
+// Box-UV у метрах для злитої геометрії
+function boxUV(geo, scale = 2.5) {
+  const p = geo.attributes.position, n = geo.attributes.normal;
+  const uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const nx = Math.abs(n.getX(i)), ny = Math.abs(n.getY(i));
+    let u, v;
+    if (ny > 0.7) { u = p.getX(i); v = p.getZ(i); } else if (nx > 0.7) { u = p.getZ(i); v = p.getY(i); } else { u = p.getX(i); v = p.getY(i); }
+    uv[i * 2] = u / scale; uv[i * 2 + 1] = v / scale;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+function colorGeo(geo, c) {
+  const n = geo.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { col[i * 3] = c; col[i * 3 + 1] = c; col[i * 3 + 2] = c; }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+function boxAt(w, h, d, x, y, z, ry = 0, rx = 0, rz = 0) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
+  return g.applyMatrix4(m);
+}
+
+// ───────────────────────── Світ ─────────────────────────
 export class World {
-  constructor(canvas, quality = 'high') {
+  constructor(canvas, quality = 'high', renderer) {
     this.canvas = canvas;
     this.q = QUALITY[quality] || QUALITY.high;
     this.qualityKey = quality;
-    const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }));
+    const r = (this.renderer = renderer);
     r.setPixelRatio(Math.min(window.devicePixelRatio, this.q.pr));
     r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.05;
+    r.toneMappingExposure = 0.9;
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.shadowMap.enabled = this.q.shadows > 0;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x0a0f22, 0.0062);
-    // карта оточення для металевих поверхонь
-    const pmrem = new THREE.PMREMGenerator(r);
-    const envScene = new RoomEnvironment();
-    envScene.traverse((o) => { if (o.isMesh && o.material && o.material.color) o.material.color.multiply(new THREE.Color(0.75, 0.8, 1.15)); });
-    this.scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-    this.scene.environmentIntensity = 0.45;
-    this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 900);
+    this.scene.fog = new THREE.FogExp2(0xb8c2cc, 0.004);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 1200);
     this.camera.position.set(0, 40, 30);
     this.clock = 0;
+    this.pmrem = new THREE.PMREMGenerator(r);
+    this.envs = {};
+    for (const [k, t] of Object.entries(A.hdr)) this.envs[k] = this.pmrem.fromEquirectangular(t).texture;
+    this.colliders = []; // прямокутники будівель для руху героя
 
     this.buildLights();
-    this.buildSky();
     this.buildTerrain();
     this.buildBase();
-    this.buildLanes();
-    this.buildPortals();
-    this.buildCore();
+    this.buildCity();
+    this.buildTreeLines();
+    this.buildProps();
     this.buildDeposits();
     this.buildCamps();
-    this.buildDecor();
+    this.buildPrecip();
     this.buildGridOverlay();
     this.buildPost();
+    this.wx = { cur: null, season: 0, kind: 'clear', snow: 0, wet: 0, autumn: 0, spring: 0, dry: 0, rain: 0, snowfall: 0, fog: 0.004, sun: 2.6, hemi: 0.6, env: 0.9, leaves: 1, flash: 0, nextBolt: 5 };
+    this.setWeather('clear', 1, true);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -83,6 +168,7 @@ export class World {
       this.sun.shadow.mapSize.set(this.q.shadows, this.q.shadows);
       if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     }
+    if (this.grass) this.grass.count = Math.min(this.grassMax, this.q.grass);
     this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => (m.needsUpdate = true)); } });
     this.resize();
   }
@@ -92,406 +178,558 @@ export class World {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    if (this.composer) {
-      this.composer.setPixelRatio(this.renderer.getPixelRatio());
-      this.composer.setSize(w, h);
-    }
+    if (this.composer) { this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.composer.setSize(w, h); }
   }
 
   buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0x6f8cff, 0x1a0f20, 0.75));
-    this.scene.add(new THREE.AmbientLight(0x223355, 0.35));
-    const s = (this.sun = new THREE.DirectionalLight(0xffd6b0, 2.3));
+    this.hemi = new THREE.HemisphereLight(0xc8d8ff, 0x5a5040, 0.5);
+    this.scene.add(this.hemi);
+    const s = (this.sun = new THREE.DirectionalLight(0xfff1dd, 2.6));
     s.position.set(-60, 90, 40);
-    s.castShadow = true;
+    s.castShadow = this.q.shadows > 0;
     s.shadow.mapSize.set(this.q.shadows || 1024, this.q.shadows || 1024);
     const sc = s.shadow.camera;
-    sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 10; sc.far = 260;
-    s.shadow.bias = -0.0004;
-    s.shadow.normalBias = 0.04;
+    sc.left = -60; sc.right = 60; sc.top = 60; sc.bottom = -60; sc.near = 10; sc.far = 260;
+    s.shadow.bias = -0.0005;
+    s.shadow.normalBias = 0.05;
     this.scene.add(s, s.target);
-    const rim = new THREE.DirectionalLight(0x9a5cff, 0.9);
-    rim.position.set(80, 40, -90);
-    this.scene.add(rim);
-    // пул точкових світел для вибухів (фіксована кількість, щоб не перекомпілювати шейдери)
     this.flashLights = [];
     for (let i = 0; i < 6; i++) {
-      const l = new THREE.PointLight(0xffffff, 0, 22, 2);
+      const l = new THREE.PointLight(0xffaa55, 0, 26, 2);
       l.userData.life = 0;
       this.scene.add(l);
       this.flashLights.push(l);
     }
   }
-  flash(x, y, z, color, intensity = 60, life = 0.25) {
-    let l = this.flashLights.find((f) => f.userData.life <= 0) || this.flashLights.reduce((a, b) => (a.userData.life < b.userData.life ? a : b));
+  flash(x, y, z, color, intensity = 60, life = 0.2) {
+    const l = this.flashLights.find((f) => f.userData.life <= 0) || this.flashLights.reduce((a, b) => (a.userData.life < b.userData.life ? a : b));
     l.position.set(x, y, z);
     l.color.set(color);
     l.userData.life = life; l.userData.max = life; l.userData.I = intensity;
   }
 
-  buildSky() {
-    const geo = new THREE.SphereGeometry(600, 48, 24);
-    const mat = new THREE.ShaderMaterial({
-      side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { time: { value: 0 } },
-      vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `
-        varying vec3 vP; uniform float time;
-        float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,45.164)))*43758.5453); }
-        void main(){
-          float y = vP.y;
-          vec3 top = vec3(0.01,0.015,0.05);
-          vec3 mid = vec3(0.06,0.04,0.16);
-          vec3 hor = vec3(0.32,0.12,0.30);
-          vec3 c = mix(hor, mid, smoothstep(-0.05, 0.25, y));
-          c = mix(c, top, smoothstep(0.25, 0.9, y));
-          // туманність
-          float n = sin(vP.x*6.0+vP.z*3.0)*sin(vP.z*5.0-vP.y*4.0+1.3)*0.5+0.5;
-          c += vec3(0.25,0.05,0.35) * pow(n,4.0) * smoothstep(0.05,0.6,y) * 0.6;
-          c += vec3(0.0,0.25,0.35) * pow(1.0-n,6.0) * smoothstep(0.2,0.8,y) * 0.35;
-          // зірки
-          vec3 sp = floor(vP*320.0);
-          float s = h(sp);
-          float tw = 0.6 + 0.4*sin(time*2.0 + s*50.0);
-          c += vec3(step(0.9975, s) * tw * smoothstep(0.0, 0.3, y));
-          gl_FragColor = vec4(c,1.0);
-        }`,
-    });
-    this.sky = new THREE.Mesh(geo, mat);
-    this.scene.add(this.sky);
-
-    // планета з атмосферою
-    const pg = new THREE.SphereGeometry(70, 64, 32);
-    const pm = new THREE.ShaderMaterial({
-      fog: false,
-      uniforms: { sunDir: { value: new THREE.Vector3(-0.6, 0.4, 0.7).normalize() } },
-      vertexShader: `varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix*normal); vW = normalize((modelMatrix*vec4(position,1.0)).xyz - cameraPosition); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
-      fragmentShader: `varying vec3 vN; varying vec3 vW; uniform vec3 sunDir;
-        void main(){
-          float l = clamp(dot(vN, normalize(vec3(-0.7,0.3,0.6))), 0.0, 1.0);
-          float band = sin(vN.y*24.0 + vN.x*4.0)*0.5+0.5;
-          vec3 base = mix(vec3(0.35,0.12,0.45), vec3(0.85,0.45,0.35), band*0.6);
-          float rim = pow(1.0 - abs(dot(vN, vec3(0,0,1))), 3.0);
-          vec3 c = base * (0.08 + l*1.1) + vec3(0.6,0.3,1.0)*rim*0.9;
-          gl_FragColor = vec4(c,1.0);
-        }`,
-    });
-    const planet = new THREE.Mesh(pg, pm);
-    planet.position.set(-260, 150, -380);
-    this.scene.add(planet);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(95, 140, 96),
-      new THREE.MeshBasicMaterial({ color: 0xc89cff, transparent: true, opacity: 0.25, side: THREE.DoubleSide, fog: false, depthWrite: false }),
-    );
-    ring.position.copy(planet.position);
-    ring.rotation.set(1.2, 0.3, 0.4);
-    this.scene.add(ring);
-    const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 32, 16), new THREE.MeshBasicMaterial({ color: 0x8fb8ff, fog: false }));
-    moon.position.set(200, 120, -420);
-    this.scene.add(moon);
-  }
-
+  // ───── місцевість ─────
   buildTerrain() {
-    const S = 2048;
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = 1024;
-    const g = cv.getContext('2d');
-    const img = g.createImageData(1024, 1024);
-    const rough = document.createElement('canvas');
-    rough.width = rough.height = 1024;
-    const rg = rough.getContext('2d');
-    const rimg = rg.createImageData(1024, 1024);
-    for (let y = 0; y < 1024; y++) {
-      for (let x = 0; x < 1024; x++) {
-        const wx = (x / 1024 - 0.5) * 300, wz = (y / 1024 - 0.5) * 300;
-        const n = fbm(wx * 0.05, wz * 0.05, 5);
-        const n2 = fbm(wx * 0.3 + 7, wz * 0.3, 3);
-        const cr = Math.pow(Math.abs(Math.sin(fbm(wx * 0.025 + 3, wz * 0.025, 3) * 18)), 8); // трещини
-        let rC = 38 + n * 50 + n2 * 22, gC = 30 + n * 34 + n2 * 14, bC = 46 + n * 46 + n2 * 20;
-        // дороги темніші
-        const dl = distToLanes(wx, wz);
-        if (dl < 6) { const k = 1 - dl / 6; rC *= 1 - 0.45 * k; gC *= 1 - 0.45 * k; bC *= 1 - 0.35 * k; }
-        rC += cr * 40; gC += cr * 10; bC += cr * 70;
-        const i = (y * 1024 + x) * 4;
-        img.data[i] = rC; img.data[i + 1] = gC; img.data[i + 2] = bC; img.data[i + 3] = 255;
-        const ro = 170 + n2 * 70 - cr * 120;
-        rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = ro; rimg.data[i + 3] = 255;
+    // маска: R дорога, G місто, B база, A рілля
+    const N = 512, S = 320;
+    const data = new Uint8Array(N * N * 4);
+    const fieldCell = 48;
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const x = (i / N - 0.5) * S, z = (j / N - 0.5) * S;
+        const dl = distToLanes(x, z);
+        let road = 1 - smooth(2.4, 3.6, dl + (hash(Math.floor(x * 2), Math.floor(z * 2)) - 0.5) * 0.4);
+        const city = inCity(x, z);
+        // вулиці міста — сітка вздовж осі міста
+        if (city > 0.2) {
+          const ca = CITY.angle;
+          const u = x * Math.cos(ca) + z * Math.sin(ca), v = -x * Math.sin(ca) + z * Math.cos(ca);
+          const su = Math.abs(((u - 6) % 34 + 34) % 34 - 17), sv = Math.abs(((v + 3) % 30 + 30) % 30 - 15);
+          road = Math.max(road, (1 - smooth(13, 15, 17 - Math.min(su, 17))) * 0, (1 - smooth(3, 4.5, Math.min(17 - su, 15 - sv))) * city);
+        }
+        const r = Math.hypot(x, z);
+        const base = 1 - smooth(BASE_R + 2, BASE_R + 6, r);
+        // поля: чергування ріллі та трави по клітинках
+        const fx = Math.floor((x + 1000) / fieldCell), fz = Math.floor((z + 1000) / fieldCell);
+        const plowCell = hash(fx * 3.1, fz * 1.7) > 0.62 ? 1 : 0;
+        const edge = Math.min(((x + 1000) % fieldCell), fieldCell - ((x + 1000) % fieldCell), ((z + 1000) % fieldCell), fieldCell - ((z + 1000) % fieldCell));
+        const plow = plowCell * smooth(3, 7, edge) * (1 - city) * (1 - base) * smooth(BASE_R + 8, BASE_R + 16, r);
+        let crater = 0;
+        for (const c of CRATERS) { const d = Math.hypot(x - c.x, z - c.z); if (d < c.r * 1.6) crater = Math.max(crater, 1 - d / (c.r * 1.6)); }
+        const k = (j * N + i) * 4;
+        data[k] = Math.round(road * 255);
+        data[k + 1] = Math.round(Math.max(city, crater * 0.9) * 255);
+        data[k + 2] = Math.round(base * 255);
+        data[k + 3] = Math.round(plow * 255);
       }
     }
-    g.putImageData(img, 0, 0);
-    rg.putImageData(rimg, 0, 0);
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    const rtex = new THREE.CanvasTexture(rough);
-    // деталізація
-    const det = document.createElement('canvas');
-    det.width = det.height = 256;
-    const dg = det.getContext('2d');
-    const dimg = dg.createImageData(256, 256);
-    for (let i = 0; i < 256 * 256; i++) {
-      const x = i % 256, y = Math.floor(i / 256);
-      const v = 128 + (fbm(x * 0.06, y * 0.06, 4) - 0.5) * 120 + (Math.random() - 0.5) * 30;
-      dimg.data[i * 4] = dimg.data[i * 4 + 1] = dimg.data[i * 4 + 2] = v; dimg.data[i * 4 + 3] = 255;
-    }
-    dg.putImageData(dimg, 0, 0);
-    const dtex = new THREE.CanvasTexture(det);
-    dtex.wrapS = dtex.wrapT = THREE.RepeatWrapping;
-    dtex.repeat.set(60, 60);
+    const mask = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+    mask.magFilter = THREE.LinearFilter; mask.minFilter = THREE.LinearFilter;
+    mask.needsUpdate = true;
+    // У masks.y=0 відповідає z=-160 (рядки по z)
 
-    const geo = new THREE.PlaneGeometry(300, 300, 220, 220);
+    const geo = new THREE.PlaneGeometry(S, S, 240, 240);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)));
     geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughnessMap: rtex, roughness: 1, metalness: 0.15, bumpMap: dtex, bumpScale: 1.6 });
+    const t = A.tex;
+    const mat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, map: t.leafy_grass.diff });
+    const U = {
+      tGrass: { value: t.leafy_grass.diff }, tGrassN: { value: t.leafy_grass.nor },
+      tDry: { value: t.withered_grass.diff }, tMud: { value: t.brown_mud_02.diff }, tMudN: { value: t.brown_mud_02.nor },
+      tRoad: { value: t.muddy_tracks.diff }, tSnow: { value: t.snow_02.diff }, tAsph: { value: t.asphalt_02.diff },
+      tAsphN: { value: t.asphalt_02.nor }, tRubble: { value: t.rubble.diff }, tMask: { value: mask },
+    };
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U, WXU);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vWP;
+          uniform sampler2D tGrass, tGrassN, tDry, tMud, tMudN, tRoad, tSnow, tAsph, tAsphN, tRubble, tMask;
+          uniform float uSnow, uWet, uAutumn, uSpring, uDry;
+          float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+            return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
+          vec3 tri(sampler2D t, vec2 uv){ return mix(texture2D(t, uv).rgb, texture2D(t, uv * 0.31 + vec2(0.37, 0.71)).rgb, 0.42); }
+          float gSnow; vec4 gMask;`)
+        .replace('#include <map_fragment>', `
+          vec2 wuv = vWP.xz;
+          gMask = texture2D(tMask, vWP.xz / 320.0 + 0.5);
+          float road = gMask.r, city = gMask.g, base = gMask.b, plow = gMask.a;
+          float macro = vn(wuv * 0.035) * 0.6 + vn(wuv * 0.13) * 0.4;
+          vec3 grass = tri(tGrass, wuv * 0.22);
+          vec3 dry = tri(tDry, wuv * 0.2);
+          float dryK = clamp(uDry * 0.55 + uAutumn * 0.85 + (macro - 0.5) * 0.7 - uSpring * 0.3, 0.0, 1.0);
+          vec3 col = mix(grass, dry, dryK);
+          col *= mix(vec3(1.0), vec3(1.04, 1.1, 0.88), uSpring);
+          vec3 mud = tri(tMud, wuv * 0.2);
+          col = mix(col, mud * vec3(0.92, 0.86, 0.78), plow);
+          vec3 asph = tri(tAsph, wuv * 0.18);
+          vec3 rub = tri(tRubble, wuv * 0.22);
+          vec3 cityC = mix(rub, asph * 0.9, smoothstep(0.45, 0.6, vn(wuv * 0.07)));
+          col = mix(col, cityC, city);
+          col = mix(col, mud * vec3(1.05, 1.0, 0.92), base * 0.85);
+          vec3 roadC = mix(tri(tRoad, wuv * 0.22) * vec3(0.78, 0.74, 0.68), asph, city);
+          col = mix(col, roadC, road);
+          gSnow = uSnow * smoothstep(0.3, 0.7, uSnow * 1.15 + (macro - 0.5) * 0.9 - road * 0.45 - base * 0.25);
+          col = mix(col, tri(tSnow, wuv * 0.2) * 1.05, gSnow);
+          col *= 1.0 - uWet * 0.3 * (1.0 - gSnow);
+          diffuseColor.rgb = col;`)
+        .replace('#include <roughnessmap_fragment>', `float roughnessFactor = mix(0.95, 0.38, uWet * (1.0 - gSnow) * (0.6 + gMask.r * 0.4 + gMask.g * 0.3));
+          roughnessFactor = mix(roughnessFactor, 0.7, gSnow);`)
+        .replace('#include <normal_fragment_maps>', `
+          {
+            vec3 tg = texture2D(tGrassN, wuv * 0.22).xyz * 2.0 - 1.0;
+            vec3 tm = texture2D(tMudN, wuv * 0.2).xyz * 2.0 - 1.0;
+            vec3 ta = texture2D(tAsphN, wuv * 0.18).xyz * 2.0 - 1.0;
+            vec3 tn = mix(tg, tm, clamp(gMask.a + gMask.r + gMask.b, 0.0, 1.0));
+            tn = mix(tn, ta, gMask.g * 0.8);
+            tn = mix(tn, vec3(0.0, 0.0, 1.0), gSnow * 0.7);
+            vec3 gw = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+            vec3 wn = normalize(gw * tn.z + vec3(tn.x, 0.0, -tn.y) * 1.1);
+            normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
+          }`);
+    };
+    mat.customProgramCacheKey = () => 'terrain';
     const ground = (this.ground = new THREE.Mesh(geo, mat));
     ground.receiveShadow = true;
     this.scene.add(ground);
-    void S;
   }
 
+  // ───── інстанси моделей ─────
+  instanced(id, list, { veg = false, shadow = true, receive = true, matOverride = null } = {}) {
+    const a = A.glb[id];
+    if (!a || !list.length) return null;
+    const mat = matOverride || patchWeather(a.mat.clone(), veg);
+    if (veg) { mat.alphaTest = 0.5; mat.transparent = false; mat.side = THREE.DoubleSide; mat.alphaMap = a.mat.alphaMap; }
+    const im = new THREE.InstancedMesh(a.geo, mat, list.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    list.forEach((it, i) => {
+      e.set(it.rx || 0, it.ry || 0, it.rz || 0);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(it.x, it.y ?? terrainHeight(it.x, it.z), it.z), q, new THREE.Vector3(it.sx ?? it.s ?? 1, it.sy ?? it.s ?? 1, it.sz ?? it.s ?? 1));
+      im.setMatrixAt(i, m);
+    });
+    im.castShadow = shadow; im.receiveShadow = receive;
+    im.computeBoundingSphere();
+    this.scene.add(im);
+    return im;
+  }
+
+  // ───── укріплена база ─────
   buildBase() {
-    // металева платформа бази з гексагональною сіткою
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = 1024;
-    const g = cv.getContext('2d');
-    g.fillStyle = '#000'; g.fillRect(0, 0, 1024, 1024);
-    const R = 22;
-    g.lineWidth = 2;
-    for (let row = -2; row < 1024 / (R * 1.5) + 2; row++) {
-      for (let col = -2; col < 1024 / (R * Math.sqrt(3)) + 2; col++) {
-        const cx = col * R * Math.sqrt(3) + (row % 2) * R * Math.sqrt(3) / 2, cy = row * R * 1.5;
-        const d = Math.hypot(cx - 512, cy - 512) / 512;
-        const a = Math.max(0, 0.22 - d * 0.12) + (hash(row, col) > 0.95 ? 0.35 : 0);
-        g.strokeStyle = `rgba(58,224,255,${a})`;
-        g.beginPath();
-        for (let k = 0; k < 7; k++) { const an = Math.PI / 3 * k + Math.PI / 6; g.lineTo(cx + Math.cos(an) * R, cy + Math.sin(an) * R); }
-        g.stroke();
+    const bags = [];
+    const R = BASE_R + 2.6;
+    for (let layer = 0; layer < 2; layer++) {
+      const n = Math.floor((2 * Math.PI * R) / 0.72);
+      for (let i = 0; i < n; i++) {
+        const a = ((i + layer * 0.5) / n) * Math.PI * 2;
+        const x = Math.cos(a) * R, z = Math.sin(a) * R;
+        if (distToLanes(x, z) < 5) continue;
+        bags.push({ x, z, y: terrainHeight(x, z) + layer * 0.17, ry: -a, s: 1, sx: 1.6, sy: 1.25, sz: 1.05 });
+        bags.push({ x: Math.cos(a) * (R + 0.5), z: Math.sin(a) * (R + 0.5), y: terrainHeight(x, z) + layer * 0.17, ry: -a + 0.05, sx: 1.6, sy: 1.25, sz: 1.05 });
       }
     }
-    // кільця
-    for (const [rr, a] of [[500, 0.9], [470, 0.3], [140, 0.6]]) { g.strokeStyle = `rgba(58,224,255,${a})`; g.lineWidth = 4; g.beginPath(); g.arc(512, 512, rr, 0, Math.PI * 2); g.stroke(); }
-    const em = new THREE.CanvasTexture(cv);
-    em.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x1a2230, metalness: 0.8, roughness: 0.35, emissive: 0xffffff, emissiveMap: em, emissiveIntensity: 0.6, transparent: false });
-    this.baseMat = mat;
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(BASE_R + 2, BASE_R + 3.5, 0.6, 96), mat);
-    plat.position.y = -0.22;
-    plat.receiveShadow = true;
-    this.scene.add(plat);
-    // опорні стовпи-маяки по периметру
-    const pillarGeo = new THREE.CylinderGeometry(0.35, 0.5, 4, 8);
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x334055, metalness: 0.9, roughness: 0.3 });
-    const capMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x3ae0ff, emissiveIntensity: 3 });
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2;
-      const x = Math.cos(a) * (BASE_R + 2.6), z = Math.sin(a) * (BASE_R + 2.6);
-      if (distToLanes(x, z) < 4) continue;
-      const p = new THREE.Mesh(pillarGeo, pillarMat);
-      p.position.set(x, 2, z);
-      p.castShadow = true;
-      this.scene.add(p);
-      const c = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 8), capMat);
-      c.position.set(x, 4.1, z);
-      this.scene.add(c);
-    }
-  }
-
-  buildLanes() {
-    // стрічки доріг з біжучими шевронами
-    const cv = document.createElement('canvas');
-    cv.width = 128; cv.height = 256;
-    const g = cv.getContext('2d');
-    g.fillStyle = '#000'; g.fillRect(0, 0, 128, 256);
-    g.strokeStyle = 'rgba(255,90,60,0.9)'; g.lineWidth = 10;
-    g.beginPath(); g.moveTo(24, 160); g.lineTo(64, 110); g.lineTo(104, 160); g.stroke();
-    g.fillStyle = 'rgba(255,60,90,1)'; g.fillRect(0, 0, 6, 256); g.fillRect(122, 0, 6, 256);
-    const tex = (this.laneTex = new THREE.CanvasTexture(cv));
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x0c0d14, roughness: 0.6, metalness: 0.6, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.1, transparent: true, opacity: 0.92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    this.instanced('cement_bag', bags);
+    // бетонні блоки на в'їздах
+    const blocks = [];
     for (const lane of LANES) {
-      // згладжена крива
-      const pts = lane.map(([x, z]) => new THREE.Vector3(x, 0, z));
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
-      const N = 200;
-      const W = 2.6;
-      const verts = [], uvs = [], idx = [];
-      let len = 0, prev = curve.getPoint(0);
-      for (let i = 0; i <= N; i++) {
-        const p = curve.getPoint(i / N);
-        len += p.distanceTo(prev); prev = p;
-        const t = curve.getTangent(i / N);
-        const nx = -t.z, nz = t.x;
-        const y = terrainHeight(p.x, p.z) + 0.08;
-        verts.push(p.x + nx * W, y, p.z + nz * W, p.x - nx * W, y, p.z - nz * W);
-        uvs.push(0, len / 5, 1, len / 5);
-        if (i < N) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+      for (let k = 0; k < lane.length - 1; k++) {
+        const [ax, az] = lane[k], [bx, bz] = lane[k + 1];
+        const ra = Math.hypot(ax, az), rb = Math.hypot(bx, bz);
+        if ((ra - R) * (rb - R) > 0) continue;
+        const t = (ra - R) / (ra - rb);
+        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const dirA = Math.atan2(bz - az, bx - ax);
+        for (const side of [-1, 1]) {
+          const ox = Math.cos(dirA + Math.PI / 2) * side * 4.2, oz = Math.sin(dirA + Math.PI / 2) * side * 4.2;
+          blocks.push({ x: x + ox, z: z + oz, ry: -dirA + Math.PI / 2, s: 1.3 });
+          blocks.push({ x: x + ox * 1.35 + Math.cos(dirA) * 2, z: z + oz * 1.35 + Math.sin(dirA) * 2, ry: -dirA + Math.PI / 2 + 0.2, s: 1.3 });
+        }
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-      geo.setIndex(idx);
-      geo.computeVertexNormals();
-      const m = new THREE.Mesh(geo, mat);
-      m.receiveShadow = true;
-      m.renderOrder = 1;
-      this.scene.add(m);
     }
+    this.instanced('concrete_road_barrier_02', blocks);
+    this.buildHQ();
   }
 
-  buildPortals() {
-    this.portals = [];
-    const swirl = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { time: { value: 0 } },
-      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
-      fragmentShader: `varying vec2 vUv; uniform float time;
-        void main(){ vec2 p = vUv*2.0-1.0; float r = length(p); float a = atan(p.y,p.x);
-          float s = sin(a*5.0 + r*14.0 - time*5.0)*0.5+0.5;
-          float m = smoothstep(1.0,0.2,r);
-          vec3 c = mix(vec3(1.0,0.1,0.35), vec3(0.6,0.1,1.0), s) * (s*0.8+0.4) * m;
-          c += vec3(1.0,0.8,1.0) * smoothstep(0.35,0.0,r)*0.8;
-          gl_FragColor = vec4(c, m); }`,
-    });
-    this.portalMat = swirl;
-    const frameMat = new THREE.MeshStandardMaterial({ color: 0x221122, metalness: 0.9, roughness: 0.3, emissive: 0xff2266, emissiveIntensity: 1.2 });
-    for (const [x, z] of PORTALS) {
-      const grp = new THREE.Group();
-      const y = terrainHeight(x, z);
-      grp.position.set(x, y, z);
-      grp.lookAt(0, y, 0);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(6, 0.7, 12, 48), frameMat);
-      ring.position.y = 6.5;
-      ring.castShadow = true;
-      grp.add(ring);
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(5.6, 48), swirl);
-      disc.position.y = 6.5;
-      grp.add(disc);
-      for (const s of [-1, 1]) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(1.2, 5, 1.6), frameMat);
-        leg.position.set(s * 5.5, 1.8, 0);
-        leg.rotation.z = s * 0.35;
-        grp.add(leg);
-      }
-      const l = new THREE.PointLight(0xff2266, 40, 30, 2);
-      l.position.y = 6.5;
-      grp.add(l);
-      this.scene.add(grp);
-      this.portals.push(grp);
-    }
-  }
-
-  buildCore() {
+  buildHQ() {
     const g = (this.core = new THREE.Group());
-    const metal = new THREE.MeshStandardMaterial({ color: 0x2a3446, metalness: 0.9, roughness: 0.25 });
-    const glow = (this.coreGlowMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x3ae0ff, emissiveIntensity: 1.6 }));
-    const base1 = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.5, 1.2, 8), metal);
-    base1.position.y = 0.6;
-    const base2 = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 5.8, 1.6, 8), metal);
-    base2.position.y = 2;
-    const ringG = new THREE.Mesh(new THREE.TorusGeometry(5.2, 0.15, 8, 64), glow);
-    ringG.rotation.x = Math.PI / 2; ringG.position.y = 2.85;
-    for (const m of [base1, base2]) { m.castShadow = m.receiveShadow = true; g.add(m); }
-    g.add(ringG);
-    // пілони
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const p = new THREE.Mesh(new THREE.BoxGeometry(0.8, 7, 0.8), metal);
-      p.position.set(Math.cos(a) * 4.6, 5, Math.sin(a) * 4.6);
-      p.rotation.z = Math.cos(a) * 0.2; p.rotation.x = -Math.sin(a) * 0.2;
-      p.castShadow = true;
-      g.add(p);
-      const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), glow);
-      tip.position.set(Math.cos(a) * 3.9, 8.8, Math.sin(a) * 3.9);
-      g.add(tip);
+    const concrete = pbr('concrete_wall_004', 1, { vertexColors: true });
+    // заглиблений бліндаж: стіни, перекриття, вхід
+    const parts = [
+      colorGeo(boxUV(boxAt(8, 1.9, 6, 0, 0.75, 0)), 0.8),
+      colorGeo(boxUV(boxAt(8.6, 0.35, 6.6, 0, 1.85, 0)), 0.7),
+      colorGeo(boxUV(boxAt(2.2, 1.7, 2.6, 2.6, 0.6, 4.1)), 0.75),
+      colorGeo(boxUV(boxAt(0.3, 1.2, 2.6, 1.45, 0.55, 4.1)), 0.7),
+      colorGeo(boxUV(boxAt(0.3, 1.2, 2.6, 3.75, 0.55, 4.1)), 0.7),
+    ];
+    const bunker = new THREE.Mesh(mergeGeometries(parts), concrete);
+    bunker.castShadow = bunker.receiveShadow = true;
+    g.add(bunker);
+    // ґрунт, присипаний на дах
+    const soil = pbr('brown_mud_02', 1.5);
+    const roof = new THREE.Mesh(boxUV(new THREE.BoxGeometry(7.8, 0.35, 5.8), 2), soil);
+    roof.position.y = 2.2; roof.castShadow = roof.receiveShadow = true;
+    g.add(roof);
+    // маскувальна сітка на стійках
+    const netTex = makeNetTexture();
+    const netMat = patchWeather(new THREE.MeshStandardMaterial({ map: netTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), true);
+    const netGeo = new THREE.PlaneGeometry(13, 10, 18, 14);
+    const np = netGeo.attributes.position;
+    for (let i = 0; i < np.count; i++) {
+      const x = np.getX(i), y = np.getY(i);
+      const edge = Math.max(Math.abs(x) / 6.5, Math.abs(y) / 5);
+      np.setZ(i, 3.4 - Math.max(0, edge - 0.75) * 9 + Math.sin(x * 1.3 + y * 0.7) * 0.12 - Math.abs(Math.sin(x * 0.9)) * 0.25);
     }
-    const crystal = (this.coreCrystal = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 1), new THREE.MeshStandardMaterial({ color: 0x0a1a28, emissive: 0x3ae0ff, emissiveIntensity: 0.55, metalness: 0.2, roughness: 0.1, flatShading: true })));
-    crystal.position.y = 7;
-    g.add(crystal);
-    this.coreRings = [];
-    for (let i = 0; i < 3; i++) {
-      const r = new THREE.Mesh(new THREE.TorusGeometry(3.4 + i * 0.7, 0.09, 8, 80), glow);
-      r.position.y = 7;
-      g.add(r);
-      this.coreRings.push(r);
+    netGeo.computeVertexNormals();
+    netGeo.rotateX(-Math.PI / 2);
+    const net = new THREE.Mesh(netGeo, netMat);
+    net.castShadow = true; net.receiveShadow = true;
+    g.add(net);
+    this.netMat = netMat;
+    const steel = patchWeather(new THREE.MeshStandardMaterial({ color: 0x3b3e38, metalness: 0.6, roughness: 0.5 }));
+    for (const [px, pz] of [[-5, -3.8], [5, -3.8], [-5, 3.8], [5, 3.8], [0, 0]]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 3.5, 6), steel);
+      pole.position.set(px, 1.7, pz);
+      g.add(pole);
     }
-    // промінь у небо
-    const beamMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { time: { value: 0 }, color: { value: new THREE.Color(0x3ae0ff) } },
-      vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
-      fragmentShader: `varying vec2 vUv; uniform float time; uniform vec3 color;
-        void main(){ float f = (1.0 - vUv.y); float s = 0.6+0.4*sin(vUv.y*40.0 - time*6.0); gl_FragColor = vec4(color * f * s * 0.9, f*0.8); }`,
-    });
-    this.coreBeamMat = beamMat;
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.2, 120, 16, 1, true), beamMat);
-    beam.position.y = 67;
-    g.add(beam);
-    this.coreLight = new THREE.PointLight(0x3ae0ff, 120, 45, 1.6);
-    this.coreLight.position.y = 7;
-    g.add(this.coreLight);
+    // антенна щогла
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 11, 6), steel);
+    mast.position.set(-3, 7.5, -2); mast.castShadow = true;
+    g.add(mast);
+    const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.15, 0.2, 14), steel);
+    dish.position.set(-3, 12.6, -2); dish.rotation.x = 0.6;
+    g.add(dish);
+    const wires = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-3, 12.5, -2), new THREE.Vector3(-8, 0.1, -6), new THREE.Vector3(-3, 12.5, -2), new THREE.Vector3(2, 0.1, -6.5),
+      new THREE.Vector3(-3, 12.5, -2), new THREE.Vector3(-6, 0.1, 3),
+    ]);
+    g.add(new THREE.LineSegments(wires, new THREE.LineBasicMaterial({ color: 0x2a2a28 })));
     this.scene.add(g);
+    // мішки: стінка довкола і ряди на даху
+    const bags = [];
+    for (let i = 0; i < 52; i++) {
+      const a = (i / 52) * Math.PI * 2;
+      if (Math.abs(a - Math.PI / 2 + 0.38) < 0.22) continue; // вхід
+      for (let l = 0; l < 4; l++) bags.push({ x: Math.cos(a) * 6.2, z: Math.sin(a) * 5.0, y: l * 0.17, ry: -a + (l % 2) * 0.15, sx: 1.6, sy: 1.25, sz: 1.05 });
+    }
+    for (let i = 0; i < 18; i++) for (const zz of [-2.6, 2.6]) bags.push({ x: -3.6 + i * 0.42, z: zz, y: 2.38, ry: Math.PI / 2, sx: 1.6, sy: 1.25, sz: 1.05 });
+    this.instanced('cement_bag', bags);
+    const props = [
+      ['portable_generator', [{ x: -6.5, z: 4.5, ry: 0.6, s: 1.3 }]],
+      ['metal_jerrycan_green', [{ x: -5.6, z: 5.6, ry: 0.2 }, { x: -5.2, z: 5.7, ry: 0.5 }, { x: -5.4, z: 6.1, ry: 1.8 }]],
+      ['wooden_military_crate', [{ x: 6.4, z: -4.2, ry: 0.3 }, { x: 6.6, z: -3.1, ry: 0.1 }, { x: 6.5, z: -3.6, y: 0.42, ry: 0.4 }]],
+      ['ammo_box', [{ x: 5.2, z: 5.4, ry: 0.4, s: 1.6 }, { x: 5.6, z: 5.6, ry: 1.2, s: 1.6 }]],
+      ['barrel_03', [{ x: -7.4, z: -1.5, s: 1 }, { x: -7.6, z: -2.4, s: 1, ry: 1 }]],
+    ];
+    for (const [id, l] of props) this.instanced(id, l.map((p) => ({ ...p, y: p.y ?? 0 })));
+    // дим над штабом при пошкодженні
+    this.coreSmoke = 0;
   }
-  setCoreHealth(f) {
-    const c = new THREE.Color(0x3ae0ff).lerp(new THREE.Color(0xff2244), 1 - f);
-    this.coreGlowMat.emissive.copy(c);
-    this.coreCrystal.material.emissive.copy(c);
-    this.coreLight.color.copy(c);
-    this.coreBeamMat.uniforms.color.value.copy(c);
+  setCoreHealth(f) { this.coreDamage = 1 - f; }
+
+  // ───── зруйноване місто ─────
+  buildCity() {
+    const rnd = srand(9001);
+    const ca = CITY.angle;
+    const plaster = pbr('rough_plaster_broken', 1, { vertexColors: true });
+    const brick = pbr('plaster_brick_01', 1, { vertexColors: true });
+    const conc = pbr('concrete_wall_004', 1, { vertexColors: true });
+    const interior = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 1 });
+    const geos = { plaster: [], brick: [], conc: [], dark: [] };
+    const placed = [];
+    const blockers = [...CAMPS.map((c) => [c.x, c.z, 8]), ...DEPOSITS.map((d) => [d.x, d.z, 10])];
+    const tries = 400;
+    let count = 0;
+    for (let i = 0; i < tries * 3 && count < 30; i++) {
+      const rr = CITY.rMin + 8 + rnd() * (CITY.rMax - CITY.rMin - 12);
+      const aa = ca + (rnd() - 0.5) * CITY.spread * 1.7;
+      const x = Math.cos(aa) * rr, z = Math.sin(aa) * rr;
+      if (inCity(x, z) < 0.55) continue;
+      const big = rnd() < 0.45;
+      const w = big ? 16 + rnd() * 10 : 7 + rnd() * 5, d = big ? 10 : 6 + rnd() * 4;
+      const rad = Math.hypot(w, d) / 2 + 1.5;
+      if (distToLanes(x, z) < rad + 4) continue;
+      if (blockers.some(([bx, bz, br]) => Math.hypot(bx - x, bz - z) < rad + br)) continue;
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < rad + p.rad)) continue;
+      const rot = ca + (rnd() < 0.5 ? 0 : Math.PI / 2) + (rnd() - 0.5) * 0.08;
+      const floors = big ? 3 + Math.floor(rnd() * 3) : 1 + Math.floor(rnd() * 2);
+      const kind = big ? (rnd() < 0.6 ? 'plaster' : 'conc') : 'brick';
+      const b = makeRuin(w, d, floors, rnd, big);
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) - 0.1, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -rot, 0)), new THREE.Vector3(1, 1, 1));
+      for (const gg of b.walls) geos[kind].push(gg.applyMatrix4(m));
+      for (const gg of b.slabs) geos.conc.push(gg.applyMatrix4(m));
+      for (const gg of b.dark) geos.dark.push(gg.applyMatrix4(m));
+      placed.push({ x, z, rad, rubble: b.rubble.map(([lx, lz, s]) => { const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(m); return [v.x, v.z, s]; }) });
+      this.colliders.push({ x, z, w: w + 0.6, d: d + 0.6, rot: -rot });
+      count++;
+    }
+    const add = (list, mat) => { if (!list.length) return; const me = new THREE.Mesh(mergeGeometries(list), mat); me.castShadow = me.receiveShadow = true; this.scene.add(me); };
+    add(geos.plaster.map((g) => boxUV(g, 3)), plaster);
+    add(geos.brick.map((g) => boxUV(g, 2)), brick);
+    add(geos.conc.map((g) => boxUV(g, 3)), conc);
+    add(geos.dark, interior);
+    // купи уламків
+    const rubbleMat = pbr('rubble', 1);
+    const chunks = [];
+    const piles = [];
+    for (const p of placed) {
+      for (const [x, z, s] of p.rubble) {
+        const pg = new THREE.SphereGeometry(s, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+        const pp = pg.attributes.position;
+        for (let i = 0; i < pp.count; i++) { const k = 0.75 + hash(i * 1.3, s) * 0.5; pp.setX(i, pp.getX(i) * k); pp.setZ(i, pp.getZ(i) * k); pp.setY(i, pp.getY(i) * 0.45 * k); }
+        pg.computeVertexNormals();
+        pg.translate(x, terrainHeight(x, z) - 0.1, z);
+        piles.push(boxUV(pg, 2));
+        for (let i = 0; i < 6; i++) chunks.push({ x: x + (rnd() - 0.5) * s * 2, z: z + (rnd() - 0.5) * s * 2, s: 0.4 + rnd() * 0.9, rx: rnd() * 3, ry: rnd() * 3, rz: rnd() * 3 });
+      }
+    }
+    if (piles.length) { const me = new THREE.Mesh(mergeGeometries(piles), rubbleMat); me.castShadow = me.receiveShadow = true; this.scene.add(me); }
+    const chunkGeo = new THREE.BoxGeometry(1, 0.35, 0.8);
+    const chunkMesh = new THREE.InstancedMesh(boxUV(chunkGeo, 1.5), conc, chunks.length);
+    const mm = new THREE.Matrix4();
+    chunks.forEach((c, i) => { mm.compose(new THREE.Vector3(c.x, terrainHeight(c.x, c.z) + 0.1, c.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(c.rx, c.ry, c.rz)), new THREE.Vector3(c.s, c.s, c.s)); chunkMesh.setMatrixAt(i, mm); });
+    chunkGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(chunkGeo.attributes.position.count * 3).fill(0.8), 3));
+    chunkMesh.castShadow = chunkMesh.receiveShadow = true;
+    this.scene.add(chunkMesh);
+    // вигорілі авто, блоки, ліхтарі, шини
+    const burnt = patchWeather(new THREE.MeshStandardMaterial({ map: texRep('rusty_metal_02', 'diff', 2), normalMap: texRep('rusty_metal_02', 'nor', 2), color: 0x4a3c34, roughness: 0.9, metalness: 0.4 }));
+    const cars = [], lamps = [], tyres = [], blk = [];
+    for (let i = 0; i < 160 && cars.length < 14; i++) {
+      const rr = CITY.rMin + 4 + rnd() * (CITY.rMax - CITY.rMin - 6), aa = ca + (rnd() - 0.5) * CITY.spread * 1.8;
+      const x = Math.cos(aa) * rr, z = Math.sin(aa) * rr;
+      if (inCity(x, z) < 0.5 || distToLanes(x, z) < 5 || placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.rad + 2)) continue;
+      cars.push({ x, z, ry: rnd() * 6.28, rz: (rnd() - 0.5) * 0.1, s: 1, y: terrainHeight(x, z) + 0.28 });
+      if (rnd() < 0.6) lamps.push({ x: x + 3, z: z + 2, ry: rnd() * 6, rz: (rnd() - 0.5) * 0.4, s: 1.6 });
+      for (let k = 0; k < 2; k++) tyres.push({ x: x + (rnd() - 0.5) * 6, z: z + (rnd() - 0.5) * 6, rx: Math.PI / 2, rz: rnd() * 6, y: terrainHeight(x, z) + 0.08, s: 1.2 });
+      if (rnd() < 0.5) blk.push({ x: x - 3, z: z + 3, ry: rnd() * 6, s: 1.3 });
+    }
+    this.instanced('covered_car', cars, { matOverride: burnt });
+    this.instanced('street_lamp_01', lamps);
+    this.instanced('old_tyre', tyres);
+    this.instanced('concrete_road_barrier', blk);
   }
 
+  // ───── лісосмуги ─────
+  buildTreeLines() {
+    const rnd = srand(31337);
+    const trees = [];
+    const spacing = 5.2 / Math.sqrt(this.q.trees);
+    const ok = (x, z, pad = 0) => {
+      const r = Math.hypot(x, z);
+      if (r < BASE_R + 12 || r > 158) return false;
+      if (inCity(x, z) > 0.25) return false;
+      if (distToLanes(x, z) < 6.5 + pad) return false;
+      for (const c of CAMPS) if (Math.hypot(c.x - x, c.z - z) < 10) return false;
+      for (const d of DEPOSITS) if (Math.hypot(d.x - x, d.z - z) < 11) return false;
+      return true;
+    };
+    const cell = 48;
+    for (let k = -4; k <= 4; k++) {
+      for (const axis of [0, 1]) {
+        const c0 = k * cell - 1000 % cell + (axis ? 4 : -2);
+        for (let t = -165; t < 165; t += spacing) {
+          const along = t + (rnd() - 0.5) * 1.5;
+          const across = c0 + (rnd() - 0.5) * 2.2;
+          const x = axis ? along : across, z = axis ? across : along;
+          if (ok(x, z) && rnd() > 0.06) trees.push({ x, z, s: 0.8 + rnd() * 0.55, ry: rnd() * 6.28, kind: rnd() });
+        }
+      }
+    }
+    // ліс по краю карти
+    for (let i = 0; i < 520 * this.q.trees; i++) {
+      const a = rnd() * Math.PI * 2, r = 128 + rnd() * 30;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (ok(x, z, 2)) trees.push({ x, z, s: 0.9 + rnd() * 0.6, ry: rnd() * 6.28, kind: rnd() });
+    }
+    this.treeCount = trees.length;
+    // стовбури
+    const bark = pbr('bark_brown_02', 1);
+    bark.map.repeat.set(1, 3); bark.normalMap.repeat.set(1, 3); bark.roughnessMap.repeat.set(1, 3);
+    const trunkGeo = new THREE.CylinderGeometry(0.12, 0.22, 5, 7, 1);
+    trunkGeo.translate(0, 2.5, 0);
+    const branchGeo = new THREE.CylinderGeometry(0.04, 0.1, 2.6, 5);
+    branchGeo.translate(0, 1.3, 0);
+    const trunks = new THREE.InstancedMesh(trunkGeo, bark, trees.length);
+    const branches = new THREE.InstancedMesh(branchGeo, bark, trees.length * 4);
+    const crowns = [];
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    trees.forEach((tr, i) => {
+      const y = terrainHeight(tr.x, tr.z);
+      const h = 0.9 + tr.kind * 0.5;
+      e.set((rnd() - 0.5) * 0.08, tr.ry, (rnd() - 0.5) * 0.08); q.setFromEuler(e);
+      m.compose(v.set(tr.x, y - 0.2, tr.z), q, sc.set(tr.s, tr.s * h, tr.s));
+      trunks.setMatrixAt(i, m);
+      for (let b = 0; b < 4; b++) {
+        e.set(0.7 + rnd() * 0.4, tr.ry + b * 1.57 + rnd() * 0.5, 0, 'YXZ'); q.setFromEuler(e);
+        m.compose(v.set(tr.x, y + 3.2 * tr.s * h + b * 0.4, tr.z), q, sc.set(tr.s, tr.s, tr.s));
+        branches.setMatrixAt(i * 4 + b, m);
+      }
+      const cs = tr.s * (1.3 + rnd() * 0.5);
+      crowns.push({ x: tr.x, z: tr.z, y: y + 3.6 * tr.s * h, ry: rnd() * 6.28, sx: cs, sy: cs * (1.1 + rnd() * 0.4), sz: cs });
+      if (tr.kind > 0.55) crowns.push({ x: tr.x + (rnd() - 0.5) * 1.6, z: tr.z + (rnd() - 0.5) * 1.6, y: y + 4.8 * tr.s * h, ry: rnd() * 6.28, s: cs * 0.75 });
+    });
+    trunks.castShadow = branches.castShadow = true;
+    trunks.receiveShadow = true;
+    this.scene.add(trunks, branches);
+    this.crowns = this.instanced('shrub_02', crowns, { veg: true });
+    this.crownCount = crowns.length;
+    // кущі, трава, пні, колоди, каміння
+    const shrubs = [], grass = [], stumps = [], logs = [], rocks = [], stones = [];
+    for (const tr of trees) {
+      if (rnd() < 0.5) shrubs.push({ x: tr.x + (rnd() - 0.5) * 4, z: tr.z + (rnd() - 0.5) * 4, ry: rnd() * 6.28, s: 2.2 + rnd() * 1.8 });
+      if (rnd() < 0.05) stumps.push({ x: tr.x + 2, z: tr.z + 1, ry: rnd() * 6, s: 0.8 + rnd() * 0.4 });
+      if (rnd() < 0.04) logs.push({ x: tr.x + 3, z: tr.z - 2, ry: rnd() * 6, s: 1 + rnd() * 0.4 });
+    }
+    for (let i = 0; i < 1600; i++) {
+      const x = (rnd() - 0.5) * 300, z = (rnd() - 0.5) * 300;
+      if (!ok(x, z, -2) && !(Math.hypot(x, z) > BASE_R + 6 && Math.hypot(x, z) < 160 && distToLanes(x, z) > 4 && inCity(x, z) < 0.2)) continue;
+      grass.push({ x, z, ry: rnd() * 6.28, s: 3 + rnd() * 3 });
+      if (rnd() < 0.08) rocks.push({ x: x + 3, z: z + 3, ry: rnd() * 6.28, rx: rnd() * 0.5, s: 5 + rnd() * 8 });
+      if (rnd() < 0.08) stones.push({ x: x - 2, z: z + 2, ry: rnd() * 6.28, s: 8 + rnd() * 14 });
+    }
+    this.instanced('shrub_04', shrubs, { veg: true });
+    this.grassMax = grass.length;
+    this.grass = this.instanced('grass_medium_01', grass, { veg: true, shadow: false });
+    if (this.grass) { this.grass.count = Math.min(grass.length, this.q.grass); this.grassMat = this.grass.material; }
+    this.instanced('tree_stump_01', stumps);
+    this.instanced('dead_tree_trunk_02', logs);
+    this.instanced('rock_07', rocks);
+    this.instanced('stone_01', stones);
+  }
+
+  buildProps() {
+    // уздовж доріг: опори ЛЕП
+    const rnd = srand(55);
+    const poleMat = pbr('bark_brown_02', 1);
+    const poles = [];
+    const lane = LANES[2];
+    for (let i = 1; i < lane.length - 1; i++) {
+      const [ax, az] = lane[i - 1], [bx, bz] = lane[i];
+      const len = Math.hypot(bx - ax, bz - az);
+      for (let t = 0; t < len; t += 18) {
+        const k = t / len;
+        const dx = (bx - ax) / len, dz = (bz - az) / len;
+        const x = ax + (bx - ax) * k - dz * 7, z = az + (bz - az) * k + dx * 7;
+        if (Math.hypot(x, z) < BASE_R + 6) continue;
+        poles.push([x, terrainHeight(x, z), z, (rnd() - 0.5) * 0.15]);
+      }
+    }
+    const pg = [];
+    for (const [x, y, z, tilt] of poles) {
+      pg.push(new THREE.CylinderGeometry(0.13, 0.17, 8, 7).translate(0, 4, 0).applyMatrix4(new THREE.Matrix4().makeRotationZ(tilt)).translate(x, y, z));
+      pg.push(new THREE.BoxGeometry(2.2, 0.14, 0.14).translate(0, 7.4, 0).applyMatrix4(new THREE.Matrix4().makeRotationZ(tilt)).translate(x, y, z));
+    }
+    if (pg.length) { const me = new THREE.Mesh(mergeGeometries(pg.map((g) => boxUV(g, 1.5))), poleMat); me.castShadow = true; this.scene.add(me); }
+    // провиси дротів
+    const pts = [];
+    for (let i = 0; i < poles.length - 1; i++) {
+      const [x1, y1, z1] = poles[i], [x2, y2, z2] = poles[i + 1];
+      if (Math.hypot(x2 - x1, z2 - z1) > 30) continue;
+      for (const off of [-1, 1]) {
+        for (let s = 0; s < 8; s++) {
+          const a = s / 8, b = (s + 1) / 8;
+          const sag = (t) => -Math.sin(t * Math.PI) * 0.9;
+          pts.push(new THREE.Vector3(x1 + (x2 - x1) * a + off * 0.9, y1 + 7.45 + (y2 - y1) * a + sag(a), z1 + (z2 - z1) * a));
+          pts.push(new THREE.Vector3(x1 + (x2 - x1) * b + off * 0.9, y1 + 7.45 + (y2 - y1) * b + sag(b), z1 + (z2 - z1) * b));
+        }
+      }
+    }
+    this.scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x1b1b1b })));
+    // спалена техніка біля доріг
+    const burnt = patchWeather(new THREE.MeshStandardMaterial({ map: texRep('rusty_metal_02', 'diff', 2), color: 0x3d342e, roughness: 0.9, metalness: 0.4 }));
+    const wrecks = [];
+    for (const l of LANES) {
+      for (const k of [1, 3]) {
+        const [x, z] = l[k];
+        wrecks.push({ x: x + 6, z: z + 4, ry: rnd() * 6, rz: 0.08, y: terrainHeight(x + 6, z + 4) + 0.25 });
+      }
+    }
+    this.instanced('covered_car', wrecks, { matOverride: burnt });
+  }
+
+  // ───── майстерні ─────
   buildDeposits() {
     this.depositObjs = [];
-    const cmat = new THREE.MeshStandardMaterial({ color: 0x1a0a30, emissive: 0xb06cff, emissiveIntensity: 1.6, roughness: 0.15, metalness: 0.1, flatShading: true });
-    this.crystalMat = cmat;
+    const brick = pbr('plaster_brick_01', 1, { vertexColors: true });
+    const conc = pbr('concrete_wall_004', 1, { vertexColors: true });
     for (const d of DEPOSITS) {
       const g = new THREE.Group();
       const y = terrainHeight(d.x, d.z);
       g.position.set(d.x, y, d.z);
+      g.rotation.y = Math.atan2(d.x, d.z);
       const rnd = srand(d.id * 977 + 3);
-      for (let i = 0; i < 9; i++) {
-        const h = 2 + rnd() * 5;
-        const c = new THREE.Mesh(new THREE.CylinderGeometry(0, 0.5 + rnd() * 0.7, h, 6), cmat);
-        const a = rnd() * 6.28, r = rnd() * 3.5;
-        c.position.set(Math.cos(a) * r, h / 2 - 0.3, Math.sin(a) * r);
-        c.rotation.set((rnd() - 0.5) * 0.8, rnd() * 6, (rnd() - 0.5) * 0.8);
-        c.castShadow = true;
-        g.add(c);
+      // руїна складу
+      const walls = [];
+      const W = 12, D = 9;
+      const floor = new THREE.Mesh(boxUV(boxAt(W, 0.3, D, 0, 0.15, 0), 3), pbr('concrete_wall_004', 1));
+      floor.receiveShadow = true;
+      g.add(floor);
+      const wallH = (x) => 2.5 + Math.sin(x * 0.9 + d.id) * 1.2 + rnd() * 0.6;
+      for (let i = 0; i < 6; i++) {
+        const x = -W / 2 + 1 + i * 2;
+        walls.push(colorGeo(boxAt(2, wallH(x), 0.35, x, wallH(x) / 2, -D / 2), 0.7 + rnd() * 0.3));
+        if (i % 2 === 0) walls.push(colorGeo(boxAt(2, wallH(x + 7) * 0.6, 0.35, x, wallH(x + 7) * 0.3, D / 2), 0.7));
       }
-      const l = new THREE.PointLight(0xb06cff, 25, 18, 2);
-      l.position.y = 3;
-      g.add(l);
-      // бурова установка (з’являється після будівництва)
+      walls.push(colorGeo(boxAt(0.35, 3.2, D, -W / 2, 1.6, 0), 0.8));
+      const wm = new THREE.Mesh(mergeGeometries(walls.map((gg) => boxUV(gg, 2))), brick);
+      wm.castShadow = wm.receiveShadow = true;
+      g.add(wm);
+      void conc;
+      // обладнання майстерні (видиме після будівництва)
       const rig = new THREE.Group();
-      const metal = new THREE.MeshStandardMaterial({ color: 0x3a4456, metalness: 0.85, roughness: 0.3 });
-      const glowM = new THREE.MeshStandardMaterial({ color: 0, emissive: 0xb06cff, emissiveIntensity: 2.5 });
-      for (let k = 0; k < 4; k++) {
-        const a = k * Math.PI / 2 + Math.PI / 4;
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 9, 0.4), metal);
-        leg.position.set(Math.cos(a) * 2.2, 4.3, Math.sin(a) * 2.2);
-        leg.rotation.set(-Math.sin(a) * 0.22, 0, Math.cos(a) * 0.22);
-        leg.castShadow = true;
-        rig.add(leg);
-      }
-      const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 2.4), metal);
-      top.position.y = 8.8;
-      rig.add(top);
-      const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.05, 7, 8), glowM);
-      drill.position.y = 4.4;
-      rig.add(drill);
-      const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 2.4, 16), metal);
-      tank.position.set(3.6, 1.2, 0);
-      tank.castShadow = true;
-      rig.add(tank);
-      const tankGlow = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.08, 6, 24), glowM);
-      tankGlow.rotation.x = Math.PI / 2; tankGlow.position.set(3.6, 1.8, 0);
-      rig.add(tankGlow);
+      const addProp = (id, x, z, ry = 0, s = 1, yy = 0) => {
+        const a = A.glb[id];
+        if (!a) return;
+        const me = new THREE.Mesh(a.geo, patchWeather(a.mat));
+        me.position.set(x, yy, z); me.rotation.y = ry; me.scale.setScalar(s);
+        me.castShadow = me.receiveShadow = true;
+        rig.add(me);
+      };
+      addProp('portable_generator', -2, -2.5, 0.4, 1.4);
+      addProp('wooden_military_crate', 2, -2.8, 0.1);
+      addProp('wooden_military_crate', 2.2, -1.8, -0.2);
+      addProp('old_military_crate', 3.5, 1.5, 0.6, 1.2);
+      addProp('barrel_03', -4, 2.5);
+      addProp('barrel_03', -3.3, 3, 0, 1);
+      addProp('metal_jerrycan_green', -1.5, 3, 0.4);
+      addProp('ammo_box', 0.5, 2.5, 0.9, 1.6);
+      // тент
+      const tarp = new THREE.Mesh(new THREE.PlaneGeometry(7, 5, 6, 4), patchWeather(new THREE.MeshStandardMaterial({ color: 0x4d5536, roughness: 0.95, side: THREE.DoubleSide, normalMap: texRep('denim_fabric', 'nor', 4) })));
+      const tp = tarp.geometry.attributes.position;
+      for (let i = 0; i < tp.count; i++) tp.setZ(i, -Math.abs(tp.getX(i)) * 0.3 + Math.sin(i) * 0.05);
+      tarp.geometry.computeVertexNormals();
+      tarp.rotation.x = -Math.PI / 2 + 0.05; tarp.position.set(0.5, 3.0, -0.5);
+      tarp.castShadow = true;
+      rig.add(tarp);
       rig.visible = false;
       g.add(rig);
       this.scene.add(g);
-      this.depositObjs.push({ g, rig, drill, def: d });
+      this.depositObjs.push({ g, rig, def: d, level: 0 });
     }
   }
   setExtractors(list) {
@@ -500,138 +738,77 @@ export class World {
       if (!o) return;
       o.rig.visible = ex.level > 0;
       o.level = ex.level;
-      o.rig.scale.setScalar(1 + Math.min(0.5, ex.level * 0.03));
     });
   }
 
+  // ───── позиції ДРГ ─────
   buildCamps() {
     this.campObjs = [];
-    const nestMat = new THREE.MeshStandardMaterial({ color: 0x2a1a14, roughness: 0.8, metalness: 0.1, emissive: 0x551100, emissiveIntensity: 0.4 });
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide });
+    const bags = [], crates = [], logs = [];
     for (const c of CAMPS) {
-      const g = new THREE.Group();
-      const y = terrainHeight(c.x, c.z);
-      g.position.set(c.x, y + 0.1, c.z);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(8.5, 9.2, 48), ringMat);
-      ring.rotation.x = -Math.PI / 2;
-      g.add(ring);
       const rnd = srand(c.id * 131 + 7);
-      for (let i = 0; i < 5 + c.tier * 2; i++) {
-        const h = 1.5 + rnd() * 3 + c.tier;
-        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.4 + rnd() * 0.5, h, 5), nestMat);
-        const a = rnd() * 6.28, r = 4 + rnd() * 4;
-        sp.position.set(Math.cos(a) * r, h / 2 - 0.2, Math.sin(a) * r);
-        sp.rotation.set((rnd() - 0.5) * 0.9, 0, (rnd() - 0.5) * 0.9);
-        sp.castShadow = true;
-        g.add(sp);
+      // кілька дуг окопів з мішків
+      const arcs = 3 + Math.min(2, c.tier);
+      for (let k = 0; k < arcs; k++) {
+        const a0 = (k / arcs) * Math.PI * 2 + rnd() * 0.6, span = 0.7 + rnd() * 0.4;
+        const r = 6.5 + rnd() * 2;
+        const n = Math.floor((span * r) / 0.68);
+        for (let i = 0; i < n; i++) {
+          const a = a0 + (i / n) * span;
+          const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+          const y = terrainHeight(x, z);
+          for (let l = 0; l < 2 + (c.tier >= 2 ? 1 : 0); l++) bags.push({ x, z, y: y + l * 0.17, ry: -a + (l % 2) * 0.12, sx: 1.6, sy: 1.25, sz: 1.05 });
+        }
       }
-      const egg = new THREE.Mesh(new THREE.SphereGeometry(0.9 + c.tier * 0.3, 16, 12), new THREE.MeshStandardMaterial({ color: 0x220a00, emissive: [0xff8833, 0xff5522, 0xff2266, 0xffcc22][c.tier], emissiveIntensity: 1.4 }));
-      egg.scale.y = 1.4;
-      egg.position.y = 1;
-      g.add(egg);
-      this.scene.add(g);
-      this.campObjs.push({ g, egg, def: c });
+      for (let i = 0; i < 2 + c.tier; i++) crates.push({ x: c.x + (rnd() - 0.5) * 6, z: c.z + (rnd() - 0.5) * 6, ry: rnd() * 6 });
+      if (c.tier >= 1) logs.push({ x: c.x + 3, z: c.z - 3, ry: rnd() * 6, s: 0.9 });
+      this.campObjs.push({ def: c });
     }
+    this.instanced('cement_bag', bags);
+    this.instanced('old_military_crate', crates);
+    this.instanced('dead_tree_trunk_02', logs);
   }
 
-  buildDecor() {
-    const rnd = srand(4242);
-    const n = Math.floor(420 * this.q.decor);
-    const rockGeo = new THREE.DodecahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a3448, roughness: 0.9, metalness: 0.1, flatShading: true });
-    const rocks = new THREE.InstancedMesh(rockGeo, rockMat, n);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
-    const free = (x, z, pad) => {
-      if (Math.hypot(x, z) < BASE_R + 5) return false;
-      if (distToLanes(x, z) < 7 + pad) return false;
-      for (const d of DEPOSITS) if (Math.hypot(d.x - x, d.z - z) < 8) return false;
-      for (const c of CAMPS) if (Math.hypot(c.x - x, c.z - z) < 7) return false;
-      return true;
-    };
-    let k = 0;
-    for (let i = 0; i < n * 4 && k < n; i++) {
-      const x = (rnd() - 0.5) * 290, z = (rnd() - 0.5) * 290;
-      const r = Math.hypot(x, z);
-      if (!free(x, z, 0) || r > 150) continue;
-      const big = r > 110 ? 3 : 1;
-      const sc = (0.5 + rnd() * rnd() * 3.2) * big;
-      p.set(x, terrainHeight(x, z) + sc * 0.2, z);
-      e.set(rnd() * 3, rnd() * 3, rnd() * 3); q.setFromEuler(e);
-      s.set(sc * (0.8 + rnd() * 0.6), sc * (0.5 + rnd() * 0.7), sc * (0.8 + rnd() * 0.6));
-      m.compose(p, q, s);
-      rocks.setMatrixAt(k++, m);
+  // ───── опади ─────
+  buildPrecip() {
+    const N = Math.floor(7000 * this.q.rain);
+    const rg = new THREE.BufferGeometry();
+    const rp = new Float32Array(N * 6);
+    for (let i = 0; i < N; i++) {
+      const x = (Math.random() - 0.5) * 120, y = Math.random() * 60, z = (Math.random() - 0.5) * 120;
+      rp.set([x, y, z, x + 0.15, y - 1.1, z], i * 6);
     }
-    rocks.count = k;
-    rocks.castShadow = rocks.receiveShadow = true;
-    this.scene.add(rocks);
-
-    // світні кристали-рослини
-    const nc = Math.floor(260 * this.q.decor);
-    const cg = new THREE.OctahedronGeometry(0.5, 0);
-    cg.scale(0.6, 2.2, 0.6);
-    const cm = new THREE.MeshStandardMaterial({ color: 0x051018, emissive: 0xffffff, emissiveIntensity: 1.8, roughness: 0.2 });
-    const crys = new THREE.InstancedMesh(cg, cm, nc);
-    const palette = [new THREE.Color(0x33e0ff), new THREE.Color(0xb06cff), new THREE.Color(0x44ff99), new THREE.Color(0xff4fd8)];
-    k = 0;
-    for (let i = 0; i < nc * 5 && k < nc; i++) {
-      const cx = (rnd() - 0.5) * 260, cz = (rnd() - 0.5) * 260;
-      if (!free(cx, cz, 1) || Math.hypot(cx, cz) > 125) continue;
-      const col = palette[Math.floor(rnd() * palette.length)];
-      const cnt = 2 + Math.floor(rnd() * 4);
-      for (let j = 0; j < cnt && k < nc; j++) {
-        const x = cx + (rnd() - 0.5) * 2.5, z = cz + (rnd() - 0.5) * 2.5;
-        const sc = 0.5 + rnd() * 1.3;
-        p.set(x, terrainHeight(x, z) + sc * 0.8, z);
-        e.set((rnd() - 0.5) * 0.7, rnd() * 3, (rnd() - 0.5) * 0.7); q.setFromEuler(e);
-        s.setScalar(sc);
-        m.compose(p, q, s);
-        crys.setMatrixAt(k, m);
-        crys.setColorAt(k, col);
-        k++;
-      }
-    }
-    crys.count = k;
-    this.scene.add(crys);
-
-    // уламки / контейнери біля бази
-    const crateGeo = new THREE.BoxGeometry(2, 1.4, 1.4);
-    const crateMat = new THREE.MeshStandardMaterial({ color: 0x3b4252, metalness: 0.7, roughness: 0.45 });
-    const crates = new THREE.InstancedMesh(crateGeo, crateMat, 40);
-    k = 0;
-    for (let i = 0; i < 400 && k < 40; i++) {
-      const a = rnd() * 6.28, r = BASE_R + 6 + rnd() * 14;
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      if (!free(x, z, 1)) continue;
-      p.set(x, 0.7 + terrainHeight(x, z), z);
-      e.set(0, rnd() * 6, 0); q.setFromEuler(e); s.setScalar(0.8 + rnd() * 0.6);
-      m.compose(p, q, s);
-      crates.setMatrixAt(k++, m);
-    }
-    crates.count = k;
-    crates.castShadow = crates.receiveShadow = true;
-    this.scene.add(crates);
-
-    // пил у повітрі
-    const dn = Math.floor(1500 * this.q.decor);
-    const dg = new THREE.BufferGeometry();
-    const dp = new Float32Array(dn * 3);
-    for (let i = 0; i < dn; i++) { dp[i * 3] = (rnd() - 0.5) * 260; dp[i * 3 + 1] = rnd() * 30; dp[i * 3 + 2] = (rnd() - 0.5) * 260; }
-    dg.setAttribute('position', new THREE.BufferAttribute(dp, 3));
-    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x88aaff, size: 0.18, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }));
-    this.scene.add(this.dust);
+    rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    this.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xaab4c0, transparent: true, opacity: 0.35, depthWrite: false, fog: false }));
+    this.rain.frustumCulled = false;
+    this.rain.visible = false;
+    this.scene.add(this.rain);
+    const sg = new THREE.BufferGeometry();
+    const sp = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) sp.set([(Math.random() - 0.5) * 120, Math.random() * 50, (Math.random() - 0.5) * 120], i * 3);
+    sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    const flake = document.createElement('canvas');
+    flake.width = flake.height = 32;
+    const fc = flake.getContext('2d');
+    const gr = fc.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    fc.fillStyle = gr; fc.fillRect(0, 0, 32, 32);
+    this.snowfall = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.28, map: new THREE.CanvasTexture(flake), transparent: true, depthWrite: false, opacity: 0.9 }));
+    this.snowfall.frustumCulled = false;
+    this.snowfall.visible = false;
+    this.scene.add(this.snowfall);
   }
 
   buildGridOverlay() {
     const cells = [];
     const M = Math.floor(BASE_R / GRID) * GRID;
     for (let x = -M; x <= M; x += GRID) for (let z = -M; z <= M; z += GRID) if (canBuildAt(x, z)) cells.push([x, z]);
-    this.buildCells = cells;
-    const geo = new THREE.PlaneGeometry(GRID * 0.86, GRID * 0.86);
+    const geo = new THREE.PlaneGeometry(GRID * 0.9, GRID * 0.9);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x1d8fb0, transparent: true, opacity: 0.07, depthWrite: false, blending: THREE.AdditiveBlending });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, depthWrite: false });
     const im = new THREE.InstancedMesh(geo, mat, cells.length);
     const m = new THREE.Matrix4();
-    cells.forEach(([x, z], i) => { m.makeTranslation(x, 0.12, z); im.setMatrixAt(i, m); });
+    cells.forEach(([x, z], i) => { m.makeTranslation(x, terrainHeight(x, z) + 0.08, z); im.setMatrixAt(i, m); });
     im.visible = false;
     this.gridOverlay = im;
     this.scene.add(im);
@@ -642,35 +819,122 @@ export class World {
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.5, 0.86);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.35, 0.4, 0.95);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
   }
 
+  // ───── погода ─────
+  setWeather(kind, season, instant = false) {
+    const P = {
+      clear: { env: 'clear', sun: 3.0, hemi: 0.55, envI: 1.0, fog: 0.0028, fogC: 0xb9c6d2, exp: 0.95, rain: 0, snow: 0, wet: 0 },
+      cloudy: { env: 'overcast', sun: 1.1, hemi: 0.75, envI: 1.0, fog: 0.0042, fogC: 0x9ea6ad, exp: 1.05, rain: 0, snow: 0, wet: 0 },
+      rain: { env: 'overcast', sun: 0.5, hemi: 0.7, envI: 0.85, fog: 0.0075, fogC: 0x8b9298, exp: 1.0, rain: 1, snow: 0, wet: 1 },
+      storm: { env: 'overcast', sun: 0.3, hemi: 0.55, envI: 0.6, fog: 0.009, fogC: 0x6c7379, exp: 0.95, rain: 1.6, snow: 0, wet: 1 },
+      fog: { env: 'misty', sun: 0.7, hemi: 0.8, envI: 1.0, fog: 0.019, fogC: 0xb0b4b6, exp: 1.05, rain: 0, snow: 0, wet: 0.4 },
+      snow: { env: 'winter', sun: 0.8, hemi: 0.8, envI: 1.0, fog: 0.0085, fogC: 0xc3c9d0, exp: 0.95, rain: 0, snow: 1, wet: 0 },
+      blizzard: { env: 'winter', sun: 0.35, hemi: 0.75, envI: 0.85, fog: 0.022, fogC: 0xc9ced4, exp: 0.95, rain: 0, snow: 2.2, wet: 0 },
+    }[kind] || {};
+    if (season === 3 && kind === 'clear') P.env = 'winter';
+    this.wx.kind = kind; this.wx.season = season; this.wx.target = P;
+    this.wx.tSnowCover = season === 3 ? 1 : 0;
+    this.wx.tAutumn = season === 2 ? 1 : 0;
+    this.wx.tSpring = season === 0 ? 1 : 0;
+    this.wx.tDry = season === 1 && (kind === 'clear' || kind === 'cloudy') ? 1 : 0;
+    this.wx.tLeaves = season === 3 ? 0 : 1;
+    if (P.env && this.wx.envKey !== P.env && this.envs[P.env]) {
+      this.wx.envKey = P.env;
+      this.scene.environment = this.envs[P.env];
+      this.scene.background = A.hdr[P.env];
+    }
+    if (instant) {
+      Object.assign(this.wx, { sun: P.sun, hemi: P.hemi, envI: P.envI, fog: P.fog, exp: P.exp, rainA: P.rain, snowA: P.snow, wet: P.wet,
+        snow: this.wx.tSnowCover, autumn: this.wx.tAutumn, spring: this.wx.tSpring, dry: this.wx.tDry, leaves: this.wx.tLeaves });
+      this.wx.fogC = new THREE.Color(P.fogC);
+    }
+  }
+
+  updateWeather(dt, focus) {
+    const w = this.wx, P = w.target;
+    if (!P) return;
+    const k = 1 - Math.exp(-dt * 0.35);
+    const ks = 1 - Math.exp(-dt * 0.08);
+    w.sun += (P.sun - w.sun) * k; w.hemi += (P.hemi - w.hemi) * k; w.envI += (P.envI - w.envI) * k;
+    w.fog += (P.fog - w.fog) * k; w.exp += (P.exp - w.exp) * k;
+    w.rainA += (P.rain - w.rainA) * k * 2; w.snowA += (P.snow - w.snowA) * k * 2;
+    w.wet += ((P.wet > w.wet ? P.wet : P.wet) - w.wet) * (P.wet > w.wet ? k : k * 0.3);
+    w.fogC.lerp(new THREE.Color(P.fogC), k);
+    // покрив снігу наростає під час снігопаду або взимку
+    const snowTarget = Math.max(w.tSnowCover * (w.snowA > 0.2 ? 1 : 0.85), 0);
+    w.snow += (snowTarget - w.snow) * ks;
+    w.autumn += (w.tAutumn - w.autumn) * ks; w.spring += (w.tSpring - w.spring) * ks; w.dry += (w.tDry - w.dry) * ks;
+    w.leaves += (w.tLeaves - w.leaves) * ks;
+    WXU.uSnow.value = w.snow; WXU.uWet.value = w.wet; WXU.uAutumn.value = w.autumn; WXU.uSpring.value = w.spring; WXU.uDry.value = w.dry;
+    // блискавки
+    let bolt = 0;
+    if (w.kind === 'storm') {
+      w.nextBolt -= dt;
+      if (w.nextBolt <= 0) { w.nextBolt = 6 + Math.random() * 10; w.flash = 1; this.onThunder && this.onThunder(); }
+    }
+    if (w.flash > 0) { w.flash -= dt * 3; bolt = Math.max(0, w.flash) * (Math.random() > 0.3 ? 1 : 0.2); }
+    this.sun.intensity = w.sun;
+    this.hemi.intensity = w.hemi + bolt * 3;
+    this.scene.environmentIntensity = w.envI + bolt * 2;
+    this.scene.backgroundIntensity = w.envI * 0.9 + bolt;
+    this.scene.fog.density = w.fog;
+    this.scene.fog.color.copy(w.fogC);
+    this.renderer.toneMappingExposure = w.exp;
+    // крони дерев: листя взимку зникає
+    if (this.crowns) {
+      this.crowns.visible = w.leaves > 0.05;
+      this.crowns.count = Math.floor(this.crownCount * Math.min(1, w.leaves * 1.1));
+    }
+    if (this.grass) this.grass.visible = w.snow < 0.6;
+    // опади слідують за камерою
+    const cx = focus ? focus.x : 0, cz = focus ? focus.z : 0;
+    this.rain.visible = w.rainA > 0.02;
+    if (this.rain.visible) {
+      const p = this.rain.geometry.attributes.position, arr = p.array;
+      const n = arr.length / 6, active = Math.floor(n * Math.min(1, w.rainA / 1.6));
+      const sp = 38 * dt;
+      for (let i = 0; i < n; i++) {
+        const o = i * 6;
+        if (i >= active) { arr[o + 1] = -100; arr[o + 4] = -100; continue; }
+        let y = arr[o + 1] - sp;
+        let x = arr[o], z = arr[o + 2];
+        if (y < -1 || y < -50 || Math.abs(x - cx) > 60 || Math.abs(z - cz) > 60) {
+          x = cx + (Math.random() - 0.5) * 120; z = cz + (Math.random() - 0.5) * 120; y = 30 + Math.random() * 30;
+        }
+        arr[o] = x; arr[o + 1] = y; arr[o + 2] = z;
+        arr[o + 3] = x + 0.2 * (1 + (w.kind === 'storm') * 2); arr[o + 4] = y - 1.2; arr[o + 5] = z;
+      }
+      p.needsUpdate = true;
+      this.rain.material.opacity = 0.18 + Math.min(1, w.rainA) * 0.22;
+    }
+    this.snowfall.visible = w.snowA > 0.02;
+    if (this.snowfall.visible) {
+      const p = this.snowfall.geometry.attributes.position, arr = p.array;
+      const n = arr.length / 3, active = Math.floor(n * Math.min(1, w.snowA / 2.2) * (w.snowA > 1.5 ? 1 : 0.6));
+      const t = this.clock, wind = w.kind === 'blizzard' ? 9 : 1.2;
+      for (let i = 0; i < n; i++) {
+        const o = i * 3;
+        if (i >= active) { arr[o + 1] = -100; continue; }
+        let x = arr[o] + (wind + Math.sin(t + i) * 0.6) * dt, y = arr[o + 1] - (1.6 + (i % 7) * 0.15) * dt, z = arr[o + 2] + Math.cos(t * 0.7 + i) * 0.5 * dt;
+        if (y < 0 || Math.abs(x - cx) > 60 || Math.abs(z - cz) > 60) { x = cx + (Math.random() - 0.5) * 120; z = cz + (Math.random() - 0.5) * 120; y = 20 + Math.random() * 30; }
+        arr[o] = x; arr[o + 1] = y; arr[o + 2] = z;
+      }
+      p.needsUpdate = true;
+    }
+  }
+
   update(dt, focus) {
     this.clock += dt;
-    const t = this.clock;
-    this.sky.material.uniforms.time.value = t;
-    this.portalMat.uniforms.time.value = t;
-    this.coreBeamMat.uniforms.time.value = t;
-    this.laneTex.offset.y -= dt * 0.6;
-    this.coreCrystal.rotation.y += dt * 0.6;
-    this.coreCrystal.position.y = 7 + Math.sin(t * 1.4) * 0.35;
-    this.coreRings.forEach((r, i) => { r.rotation.x = t * (0.5 + i * 0.3) + i; r.rotation.y = t * (0.35 - i * 0.2); r.position.y = this.coreCrystal.position.y; });
-    this.coreLight.intensity = 70 + Math.sin(t * 3) * 15;
-    for (const o of this.depositObjs) if (o.rig.visible) o.drill.rotation.y += dt * (3 + (o.level || 0) * 0.3);
-    for (const o of this.campObjs) o.egg.material.emissiveIntensity = 1.1 + Math.sin(t * 2 + o.def.id) * 0.5;
-    this.baseMat.emissiveIntensity = 0.55 + Math.sin(t * 1.5) * 0.1;
-    if (this.dust) this.dust.position.y = Math.sin(t * 0.2) * 1.5;
+    this.updateWeather(dt, focus);
     for (const l of this.flashLights) {
-      if (l.userData.life > 0) {
-        l.userData.life -= dt;
-        l.intensity = Math.max(0, l.userData.life / l.userData.max) * l.userData.I;
-      } else l.intensity = 0;
+      if (l.userData.life > 0) { l.userData.life -= dt; l.intensity = Math.max(0, l.userData.life / l.userData.max) * l.userData.I; } else l.intensity = 0;
     }
-    // тіні слідують за камерою
     if (focus) {
-      this.sun.position.set(focus.x - 60, 90, focus.z + 40);
+      this.sun.position.set(focus.x - 50, 90, focus.z + 35);
       this.sun.target.position.set(focus.x, 0, focus.z);
     }
   }
@@ -680,4 +944,95 @@ export class World {
     else this.renderer.render(this.scene, this.camera);
   }
 }
-export { WORLD };
+
+// ───────── зруйнована будівля ─────────
+function makeRuin(W, D, floors, rnd, panel) {
+  const FH = 3, T = 0.35;
+  const walls = [], slabs = [], dark = [], rubble = [];
+  const H = floors * FH;
+  // профіль руйнування: V-подібний обвал у випадковому місці
+  const cx = (rnd() - 0.5) * W * 0.8, cw = W * (0.2 + rnd() * 0.35), depth = H * (0.3 + rnd() * 0.7);
+  const cz = (rnd() - 0.5) * D * 0.6;
+  const maxH = (x, z) => {
+    const dd = Math.max(0, 1 - Math.hypot((x - cx) / cw, (z - cz) / (D * 0.8)));
+    return H - depth * Math.min(1, dd * 1.6) - (rnd() < 0.08 ? FH : 0);
+  };
+  const win = panel ? 1.5 : 1.2, pier = panel ? 1.6 : 1.4;
+  const facade = (len, place) => {
+    const cols = Math.max(1, Math.floor(len / (win + pier)));
+    const step = len / cols;
+    for (let c = 0; c < cols; c++) {
+      const u0 = -len / 2 + c * step;
+      for (let f = 0; f < floors; f++) {
+        const y0 = f * FH;
+        const mid = u0 + step / 2;
+        const lim = place(mid, 0, true);
+        if (y0 + FH > lim + 0.5) {
+          // зламаний верх — короткий уламок
+          if (y0 < lim) {
+            const hh = Math.max(0.3, lim - y0);
+            walls.push(place(u0 + step * 0.25, y0 + hh / 2, false, step * 0.5, hh));
+          }
+          continue;
+        }
+        const tint = 0.55 + rnd() * 0.45 - (f === floors - 1 ? 0.1 : 0);
+        // простінок, підвіконня, перемичка
+        walls.push(colorGeo(place(u0 + (step - win) / 4, y0 + FH / 2, false, (step - win) / 2, FH), tint));
+        walls.push(colorGeo(place(u0 + step - (step - win) / 4, y0 + FH / 2, false, (step - win) / 2, FH), tint));
+        if (rnd() > 0.06) walls.push(colorGeo(place(mid, y0 + 0.45, false, win, 0.9), tint));
+        walls.push(colorGeo(place(mid, y0 + FH - 0.25, false, win, 0.5), tint * 0.95));
+      }
+    }
+  };
+  for (const side of [-1, 1]) {
+    facade(W, (u, y, q, w, h) => {
+      if (q) return maxH(u, side * D / 2);
+      return boxAt(w, h, T, u, y, side * D / 2);
+    });
+    facade(D, (u, y, q, w, h) => {
+      if (q) return maxH(side * W / 2, u);
+      return boxAt(T, h, w, side * W / 2, y, u);
+    });
+  }
+  walls.forEach((g, i) => { if (!g.attributes.color) walls[i] = colorGeo(g, 0.5); });
+  // перекриття
+  for (let f = 1; f <= floors; f++) {
+    const y = f * FH - 0.1;
+    const segs = 4;
+    for (let s = 0; s < segs; s++) {
+      const x0 = -W / 2 + (s + 0.5) * (W / segs);
+      if (maxH(x0, 0) < y - 0.2) {
+        if (rnd() < 0.5) slabs.push(colorGeo(boxAt(W / segs, 0.22, D * 0.9, x0, Math.max(0.6, maxH(x0, 0) - 0.5), 0, 0, 0, (rnd() - 0.5) * 0.7), 0.6));
+        continue;
+      }
+      slabs.push(colorGeo(boxAt(W / segs, 0.22, D - 0.1, x0, y, 0), 0.7 + rnd() * 0.2));
+    }
+  }
+  // темний «інтер'єр» за вікнами
+  const ih = Math.max(1, H - depth - 0.6);
+  dark.push(boxAt(W - 1.2, ih, D - 1.2, 0, ih / 2, 0));
+  rubble.push([cx, D / 2 + 2.5, 2.5 + depth * 0.4], [cx * 0.7, -D / 2 - 2, 1.8 + depth * 0.25]);
+  return { walls, slabs, dark, rubble };
+}
+
+function makeNetTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 256);
+  const cols = ['#4c5a33', '#5d6b3c', '#3d4a2b', '#6b6a44', '#55613a'];
+  for (let i = 0; i < 420; i++) {
+    g.fillStyle = cols[i % cols.length];
+    const x = Math.random() * 256, y = Math.random() * 256, s = 3 + Math.random() * 7;
+    g.beginPath();
+    g.ellipse(x, y, s, s * 0.5, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.strokeStyle = 'rgba(45,51,32,0.9)'; g.lineWidth = 1;
+  for (let i = 0; i < 256; i += 8) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 256); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(256, i); g.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 3);
+  return t;
+}

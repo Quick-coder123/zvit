@@ -18,7 +18,7 @@ jobs:
       - run: npx electron-builder --win portable zip --publish never
       - uses: actions/upload-artifact@v4
         with:
-          name: NeonBastion-windows
+          name: LastLine-windows
           path: |
             dist/*.exe
             dist/*.zip

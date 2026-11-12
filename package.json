@@ -1,8 +1,8 @@
 {
-  "name": "neon-bastion",
-  "productName": "Неоновий Бастіон",
+  "name": "last-line",
+  "productName": "Останній рубіж",
   "version": "1.0.0",
-  "description": "Кооперативний sci-fi tower defense на 3 гравців з героями, грінд-прокачкою",
+  "description": "Кооперативна оборона позиції на 3 гравців: сучасна війна, сезони, погода, прокачка",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -15,12 +15,14 @@
     "ws": "8.18.0"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.1.1",
     "electron": "37.2.0",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "sharp": "^0.33.5"
   },
   "build": {
-    "appId": "ua.neonbastion.game",
-    "productName": "NeonBastion",
+    "appId": "ua.lastline.game",
+    "productName": "LastLine",
     "files": [
       "electron/**",
       "server/**",
@@ -38,8 +40,8 @@
       "output": "dist"
     },
     "portable": {
-      "artifactName": "NeonBastion-${version}-portable.exe"
+      "artifactName": "LastLine-${version}-portable.exe"
     }
   },
-  "author": "Neon Bastion"
+  "author": "Last Line"
 }

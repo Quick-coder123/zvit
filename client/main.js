@@ -1,13 +1,15 @@
 // Клієнт: мережа, керування, синхронізація сутностей, камера, оверлей.
 import * as THREE from 'three';
 import { World, terrainHeight } from './scene.js';
-import { makeHero, makeTower, setTowerLevel, makeEnemy, makeLoot, makeGhost, makeDrone } from './models.js';
-import { FX, PCOLORS } from './fx.js';
+import { loadAssets } from './assets.js';
+import { makeHero, makeTower, setTowerLevel, makeEnemy, makeLoot, makeGhost, makeDrone, burntMaterial } from './models.js';
+import { FX } from './fx.js';
 import { Audio } from './audio.js';
 import { UI } from './ui.js';
 import {
   ENEMIES, ENEMY_KINDS, TOWERS, TOWER_TYPES, DEPOSITS, CAMPS, LANES, BASE_R, ABILITIES, DIFFICULTY,
   canBuildAt, snap as snapGrid, towerStats, fmt, RARITIES, TOWER_MAX_LVL, towerUpgradeCost, extractorUpgradeCost, EXTRACTOR_COST,
+  SEASONS, WEATHER,
 } from '/shared/data.js';
 
 const $ = (id) => document.getElementById(id);
@@ -43,10 +45,18 @@ const G = {
 };
 window.G = G;
 
-const world = new World($('gl'), settings.quality);
-const fx = new FX(world);
+const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: false, powerPreference: 'high-performance' });
+window.__r = renderer;
 const audio = (G.audio = new Audio());
 const ui = new UI(G);
+$('lobby-status').textContent = 'Завантаження ресурсів… 0%';
+await loadAssets(renderer, (p) => { $('lobby-status').textContent = `Завантаження ресурсів… ${Math.round(p * 100)}%`; });
+$('lobby-status').textContent = 'Побудова світу…';
+await new Promise((r) => setTimeout(r, 30));
+const world = new World($('gl'), settings.quality, renderer);
+window.__w = world;
+const fx = new FX(world);
+world.onThunder = () => setTimeout(() => audio.play('thunder'), 300 + Math.random() * 1500);
 G.applySettings({});
 const overlay = $('overlay');
 const octx = overlay.getContext('2d');
@@ -86,7 +96,12 @@ function onMsg(m) {
     }
     case 'snap': onSnap(m); break;
     case 'msg': ui.feed(m.text, m.color); break;
-    case 'respawn': me.x = m.x; me.z = m.z; me.vx = me.vz = 0; break;
+    case 'respawn': {
+      me.x = m.x; me.z = m.z; me.vx = me.vz = 0;
+      const tp = params.get('tp'); // налагодження: ?tp=x,z
+      if (tp) { const [tx, tz] = tp.split(',').map(Number); me.x = tx; me.z = tz; }
+      break;
+    }
   }
 }
 
@@ -111,7 +126,7 @@ function onHello(m) {
   }
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden');
-  ui.feed('Ласкаво просимо на форпост! Відбивайте напади, качайтесь у зонах за периметром.', '#3ae0ff');
+  ui.feed('Ласкаво просимо на позицію! Тримайте оборону, зачищайте ДРГ за периметром.', '#e8dcb8');
 }
 // лобі
 let setupDiff = 'normal', setupPrep = 120;
@@ -146,17 +161,16 @@ function onWorld(m) {
     let o = towers.get(t.id);
     if (!o) {
       const obj = makeTower(t.type);
-      obj.position.set(t.x, 0, t.z);
+      obj.position.set(t.x, terrainHeight(t.x, t.z), t.z);
       world.scene.add(obj);
       o = { obj, data: t, rot: 0, level: 0, recoil: 0 };
       towers.set(t.id, o);
-      fx.emit(t.x, 1, t.z, TOWERS[t.type].color, 30, { speed: 6, life: 0.6, size: 0.8 });
-      fx.ring(t.x, t.z, 3, TOWERS[t.type].color, 0.5);
+      fx.puff(t.x, 0.3, t.z, 0x8a7f6a, 20, { speed: 3, life: 1.5, size: 0.6, size1: 2.2, alpha: 0.5, up: 0.4 });
     }
     if (o.level !== t.level) { setTowerLevel(o.obj, t.level); o.level = t.level; }
     o.data = t;
   }
-  for (const [id, o] of towers) if (!seen.has(id)) { world.scene.remove(o.obj); if (o.laser) world.scene.remove(o.laser); towers.delete(id); }
+  for (const [id, o] of towers) if (!seen.has(id)) { world.scene.remove(o.obj); towers.delete(id); }
   world.setExtractors(m.extractors);
   ui.renderPanel();
   ui.updateBuildBar();
@@ -174,6 +188,8 @@ function ensureHero(p) {
 }
 
 let lastSnapAt = 0;
+let curWx = null, curSea = null;
+const dying = [];
 function onSnap(s) {
   const prev = G.snap;
   G.snap = s;
@@ -210,18 +226,16 @@ function onSnap(s) {
       e = { obj, kind, x, z, rot, seed: Math.random() * 10, def: ENEMIES[kind] };
       enemies.set(id, e);
       obj.position.set(x, terrainHeight(x, z), z);
-      if (!e.def.wild) fx.emit(x, 2, z, 0xff2266, 12, { speed: 4, life: 0.5, size: 0.8 });
     }
-    if (e.hp != null && hp < e.hp) e.obj.userData.hitFlash = 0.12;
     e.tx = x; e.tz = z; e.trot = rot; e.hp = hp; e.sh = sh; e.slow = slow; e.lvl = lvl;
   }
-  for (const [id, e] of enemies) if (!seen.has(id)) { world.scene.remove(e.obj); enemies.delete(id); }
+  for (const [id, e] of enemies) if (!seen.has(id)) { enemies.delete(id); startDying(e); }
 
-  // вежі (поворот, лазер)
-  for (const [id, rot, laserT, aura, ramp] of s.towers) {
+  // вежі (поворот)
+  for (const [id, rot, target, aura] of s.towers) {
     const o = towers.get(id);
     if (!o) continue;
-    o.trot = rot; o.laserT = laserT; o.ramp = ramp;
+    o.trot = rot; o.target = target;
     o.obj.userData.auraRing.visible = !!aura;
   }
   // лут
@@ -238,85 +252,129 @@ function onSnap(s) {
   for (const [id, l] of loots) if (!ls.has(id)) { world.scene.remove(l.obj); loots.delete(id); }
 
   for (const ev of s.ev) handleEvent(ev);
+  if (s.wx !== curWx || s.sea !== curSea) {
+    world.setWeather(s.wx, s.sea, curWx == null);
+    audio.setWeather(s.wx);
+    curWx = s.wx; curSea = s.sea;
+  }
   ui.updateHUD();
   world.setCoreHealth(s.core[0] / s.core[1]);
   audio.setIntensity(s.phase === 'wave' ? 1 : 0);
 }
 
 let hurtFlash = 0;
+const TOWER_SND = { mg: 'mg', ags: 'ags', aa: 'aa', atgm: 'atgm', mortar: 'mortar', howitzer: 'howitzer' };
+const MUZZLE_BIG = { mg: 0.8, ags: 1, aa: 1, atgm: 1.6, mortar: 1.8, howitzer: 3 };
 function handleEvent(ev) {
-  const near = (x, z) => Math.max(0.15, 1 - Math.hypot(x - me.x, z - me.z) / 90);
+  const near = (x, z) => Math.max(0.12, 1 - Math.hypot(x - me.x, z - me.z) / 110);
   switch (ev.e) {
-    case 'ps': fx.spawnProjectile(ev); if (ev.k === 'hero') audio.play('shoot', near(ev.p[0], ev.p[2])); else if (ev.k === 'blaster') audio.play('blaster', near(ev.p[0], ev.p[2])); else if (ev.k === 'mortar') audio.play('mortar', near(ev.p[0], ev.p[2])); break;
-    case 'ph': fx.endProjectile(ev); break;
-    case 'beam': {
-      const col = PCOLORS[ev.k] || 0xffffff;
-      fx.beam(ev.a, ev.b, col, ev.k === 'rail' ? 0.35 : ev.k === 'drone' ? 0.06 : 0.18, ev.k === 'rail' ? 0.3 : 0.12);
-      fx.emit(ev.b[0], ev.b[1], ev.b[2], col, ev.k === 'rail' ? 4 : 8, { speed: 5, life: 0.35, size: 0.6 });
-      if (ev.k === 'rail') { audio.play('rail', near(ev.a[0], ev.a[2])); for (let i = 0; i < 12; i++) { const t = i / 12; fx.emit(ev.a[0] + (ev.b[0] - ev.a[0]) * t, 1.5, ev.a[2] + (ev.b[2] - ev.a[2]) * t, 0xffee55, 1, { speed: 1, life: 0.5, size: 0.5 }); } }
-      if (ev.k === 'cryo') audio.play('cryo', near(ev.a[0], ev.a[2]));
+    case 'ps':
+      fx.spawnProjectile(ev);
+      if (ev.k === 'hero') audio.play('rifle', near(ev.p[0], ev.p[2]));
+      else if (ev.k === 'ebullet') audio.play('erifle', near(ev.p[0], ev.p[2]));
+      else if (ev.k === 'rocket') audio.play('atgm', near(ev.p[0], ev.p[2]));
       break;
-    }
-    case 'chain': fx.lightning(ev.p, 0xbb77ff); audio.play('tesla', near(ev.p[0][0], ev.p[0][2])); break;
+    case 'ph': fx.endProjectile(ev); break;
     case 'tf': {
       const o = towers.get(ev.id);
-      if (o) {
-        o.recoil = 1;
-        const mz = o.obj.userData.muzzles[0];
-        if (mz) {
-          const p = o.obj.userData.head.localToWorld(mz.clone());
-          fx.emit(p.x, p.y, p.z, TOWERS[o.data.type].color, 3, { speed: 3, life: 0.15, size: 0.9 });
-        }
+      if (!o) break;
+      o.recoil = 1;
+      const u = o.obj.userData;
+      const dir = new THREE.Vector3(Math.sin(u.head.rotation.y), 0, Math.cos(u.head.rotation.y));
+      for (const mz of u.muzzles) {
+        const p = u.head.localToWorld(mz.clone());
+        fx.muzzle(p.x, p.y, p.z, MUZZLE_BIG[u.type] || 1, dir);
       }
+      if (u.type === 'atgm' || u.type === 'howitzer' || u.type === 'mortar') fx.puff(o.data.x, terrainHeight(o.data.x, o.data.z) + 0.3, o.data.z, 0x8a7f6a, 8, { speed: 3, life: 1.2, size: 0.6, size1: 2, alpha: 0.45, up: 0.2 });
+      audio.play(TOWER_SND[u.type], near(o.data.x, o.data.z));
       break;
     }
     case 'boom': {
-      const col = { gren: 0xff9933, orbit: 0x66ccff, mortar: 0xff7733 }[ev.k] || 0xff8833;
-      fx.explosion(ev.x, ev.z, ev.r, col, ev.k === 'orbit' ? 0 : ev.k === 'gren' ? 1.4 : 1);
-      audio.play('boom', near(ev.x, ev.z));
-      if (ev.k === 'orbit') audio.play('bigboom');
-      if (ev.k !== 'mortar') shake(0.35);
+      const big = { agsg: 0.45, mortar: 1, shell: 1.8, rocket: 1, gren: 0.9, orbit: 1.6 }[ev.k] || 1;
+      if (ev.k !== 'orbit') fx.explosion(ev.x, ev.z, ev.r * (ev.k === 'agsg' ? 0.7 : 0.6), big);
+      if (ev.k !== 'orbit') audio.play(ev.k === 'agsg' ? 'smallboom' : big > 1.5 ? 'bigboom' : 'boom', near(ev.x, ev.z));
+      if (big >= 1) shake(0.15 * big * near(ev.x, ev.z));
       break;
     }
     case 'die': {
-      const e = enemies.get(-1);
-      void e;
       const d = ENEMIES[ENEMY_KINDS[ev.k]];
-      const big = d.boss ? 4 : d.size;
-      fx.emit(ev.x, 1 + (d.flying ? 3 : 0), ev.z, d.color, 18 * big, { speed: 7 * Math.sqrt(big), life: 0.7, size: 0.7 * big, grav: 1, up: 1 });
-      fx.emit(ev.x, 1, ev.z, 0xffffff, 6 * big, { speed: 3, life: 0.25, size: 1.2 * big });
-      if (d.boss) { fx.explosion(ev.x, ev.z, 12, d.color, 3); audio.play('bigboom'); shake(1); ui.banner('БОСА ЗНИЩЕНО', d.name, '#ffa02a', 3); }
-      else audio.play('die', near(ev.x, ev.z));
-      if (ev.c > 0 && Math.hypot(ev.x - me.x, ev.z - me.z) < 45) floaters.push({ x: ev.x, y: 2.5, z: ev.z, text: `+${fmt(ev.c)}◈`, color: '#ffd23a', t: 1.1, size: 13 });
+      if (d.boss) { audio.play('bigboom'); shake(0.8); ui.banner('ЦІЛЬ ЗНИЩЕНО', d.name, '#e8b24a', 3); }
+      else if (d.vehicle || d.flying) audio.play('boom', near(ev.x, ev.z));
+      if (ev.c > 0 && Math.hypot(ev.x - me.x, ev.z - me.z) < 45) floaters.push({ x: ev.x, y: 2.5, z: ev.z, text: `+${fmt(ev.c)} ₴`, color: '#e8c35a', t: 1.1, size: 13 });
       break;
     }
     case 'dmg':
       if (ev.n === G.name && settings.dmgNums) floaters.push({ x: ev.x + (Math.random() - 0.5), y: 2.5, z: ev.z, text: fmt(ev.v), color: ev.c ? '#ffd23a' : '#ffffff', t: 0.8, size: ev.c ? 20 : 14 });
-      if (ev.n === G.name) audio.play('hit', 0.6);
       break;
-    case 'spark': fx.emit(ev.x, ev.y, ev.z, ev.c ?? 0xffffff, 4, { speed: 5, life: 0.25, size: 0.5 }); break;
-    case 'dash': fx.dash(ev.a, ev.b, ev.c); break;
+    case 'spark': {
+      let e = null, bd = 3;
+      for (const q of enemies.values()) { const d = Math.hypot(q.x - ev.x, q.z - ev.z); if (d < bd) { bd = d; e = q; } }
+      const y = e ? e.obj.position.y + (e.def.human ? 1.3 : 1) : terrainHeight(ev.x, ev.z) + 1;
+      fx.hitSpark(ev.x, y, ev.z, e ? !!e.def.human : true);
+      break;
+    }
+    case 'dash': fx.dash(ev.a, ev.b); audio.play('dash'); break;
     case 'gren': fx.grenade(ev.a, ev.b); break;
-    case 'orbit': fx.orbital(ev.x, ev.z); break;
-    case 'core': fx.explosion(ev.x, ev.z, 3, 0xff2244, 0.6); fx.emit(0, 7, 0, 0xff2244, 20, { speed: 8, life: 0.5, size: 1 }); audio.play('core'); shake(0.25); break;
-    case 'swing': fx.ring(ev.x, ev.z, 1.5 + ev.s, 0xff5533, 0.3, 0.3); break;
-    case 'stomp': fx.ring(ev.x, ev.z, ev.r, 0xff2222, 0.8, 0.3); fx.emit(ev.x, 0.5, ev.z, 0x886655, 50, { speed: 14, life: 0.8, size: 1.6, up: 0.3 }); audio.play('stomp'); shake(0.6); break;
-    case 'heal': fx.ring(ev.x, ev.z, 7, 0x44ffaa, 0.6, 0.4); fx.emit(ev.x, 1.5, ev.z, 0x44ffaa, 8, { speed: 2, life: 0.8, size: 0.6, grav: -0.3 }); break;
-    case 'hdie': fx.explosion(ev.x, ev.z, 4, 0xff4a5a, 1); audio.play('boom'); break;
-    case 'lvl': fx.emit(ev.x, 1, ev.z, 0xffd23a, 60, { speed: 4, life: 1.2, size: 0.8, grav: -0.6, up: 1 }); fx.ring(ev.x, ev.z, 4, 0xffd23a, 0.8); break;
+    case 'orbit': fx.artillery(ev.x, ev.z); audio.play('incoming'); setTimeout(() => { audio.play('bigboom'); shake(0.6); }, 1200); break;
+    case 'drop': fx.explosion(ev.x, ev.z, 1.5, 0.4); audio.play('smallboom', near(ev.x, ev.z)); break;
+    case 'eshot': fx.eshot(ev.a, ev.b, ev.y, ev.k); audio.play(ev.k === 'cannon' ? 'cannon' : 'emg', near(ev.a[0], ev.a[1])); break;
+    case 'core': fx.explosion(ev.x, ev.z, 3, 1); audio.play('boom'); shake(0.3); break;
+    case 'heal': fx.emit(ev.x, terrainHeight(ev.x, ev.z) + 1.5, ev.z, 0xbfe0ff, 4, { speed: 3, life: 0.2, size: 0.2, grav: 1 }); break;
+    case 'unload': fx.puff(ev.x, terrainHeight(ev.x, ev.z) + 0.5, ev.z, 0x8a7f6a, 14, { speed: 3, life: 1.5, size: 0.8, size1: 2.5, alpha: 0.5 }); break;
+    case 'hdie': fx.puff(ev.x, 0.6, ev.z, 0x5a1a14, 10, { speed: 2, life: 0.8, size: 0.3, size1: 0.8, alpha: 0.8, grav: 0.5 }); audio.play('hurt'); break;
+    case 'lvl': fx.emit(ev.x, terrainHeight(ev.x, ev.z) + 1.5, ev.z, 0xffe0a0, 25, { speed: 3, life: 1, size: 0.25, grav: -0.3, up: 1 }); break;
     case 'pick': {
       if (ev.n === G.name) { audio.play(ev.r >= 4 ? 'legend' : 'pick'); floaters.push({ x: ev.x, y: 3, z: ev.z, text: RARITIES[ev.r].name + '!', color: RARITIES[ev.r].color, t: 1.6, size: 16 }); }
-      fx.emit(ev.x, 1, ev.z, new THREE.Color(RARITIES[ev.r].color).getHex(), 20, { speed: 4, life: 0.6, size: 0.7, grav: -0.5 });
       break;
     }
     case 'build': audio.play('build'); break;
-    case 'up': fx.emit(ev.x, 2, ev.z, 0x4dff7a, 30, { speed: 3, life: 0.9, size: 0.6, grav: -0.8 }); fx.ring(ev.x, ev.z, 3, 0x4dff7a, 0.6); audio.play('upgrade'); break;
-    case 'sell': fx.emit(ev.x, 1, ev.z, 0xffd23a, 25, { speed: 5, life: 0.7, size: 0.6 }); break;
-    case 'wave': ui.banner(`ХВИЛЯ ${ev.w}`, ev.w % 10 === 0 ? 'Увага: бос!' : 'вороги атакують', '#ff8a3a', 3); audio.play('wave'); break;
-    case 'boss': ui.banner('⚠ БОС ⚠', ENEMIES[ev.k].name, '#ff3355', 3.5); audio.play('boss'); shake(0.5); break;
-    case 'clear': ui.banner('ХВИЛЮ ВІДБИТО', 'час на прокачку', '#4dff7a', 3); audio.play('clear'); break;
-    case 'defeat': ui.banner('ЯДРО ВПАЛО', 'хвиля повториться', '#ff3355', 4); audio.play('defeat'); shake(1); break;
-    case 'camp': fx.ring(ev.x, ev.z, 10, 0xffd23a, 1); ui.feed('Табір зачищено! Він відродиться сильнішим.', '#ffd23a'); break;
+    case 'up': fx.puff(ev.x, terrainHeight(ev.x, ev.z) + 0.4, ev.z, 0x8a7f6a, 12, { speed: 2, life: 1.2, size: 0.5, size1: 1.8, alpha: 0.45 }); audio.play('upgrade'); break;
+    case 'sell': fx.puff(ev.x, terrainHeight(ev.x, ev.z) + 0.4, ev.z, 0x8a7f6a, 16, { speed: 3, life: 1.2, size: 0.6, size1: 2, alpha: 0.5 }); break;
+    case 'wave': ui.banner(`ХВИЛЯ ${ev.w}`, ev.w % 10 === 0 ? 'Увага: важка ціль!' : 'противник атакує', '#e8a04a', 3); audio.play('siren'); break;
+    case 'boss': ui.banner('⚠ ВАЖКА ЦІЛЬ', ENEMIES[ev.k].name, '#e85a4a', 3.5); audio.play('siren'); shake(0.3); break;
+    case 'clear': ui.banner('ХВИЛЮ ВІДБИТО', 'час на підготовку', '#9ccf6a', 3); audio.play('clear'); break;
+    case 'defeat': ui.banner('ШТАБ ЗНИЩЕНО', 'хвиля повториться', '#e85a4a', 4); audio.play('defeat'); shake(0.8); break;
+    case 'camp': ui.feed('Позицію ДРГ зачищено! Згодом противник поверне її сильнішими силами.', '#e8c35a'); break;
+    case 'season': ui.banner(SEASONS[ev.s].name.toUpperCase(), 'настала нова пора року', '#e8dcb8', 3); break;
+  }
+}
+
+// ───────────── загиблі: падіння, вигоряння ─────────────
+function startDying(e) {
+  const o = e.obj, u = o.userData;
+  const d = { obj: o, t: 0, human: u.human, vehicle: u.vehicle, flying: u.flying, rx: o.rotation.x, y0: o.position.y, vy: 0, side: Math.random() < 0.5 ? -1 : 1, life: 7 };
+  if (u.flying) {
+    if (e.kind === 'shahed' || e.kind === 'fpv') { fx.explosion(o.position.x, o.position.z, e.kind === 'shahed' ? 4 : 1.8, e.kind === 'shahed' ? 1.4 : 0.6, o.position.y); world.scene.remove(o); return; }
+    d.life = 30;
+  } else if (u.vehicle || u.boss) {
+    o.traverse((m) => { if (m.isMesh && !m.isInstancedMesh) m.material = burntMaterial(); });
+    fx.explosion(o.position.x, o.position.z, u.boss ? 6 : 3.5, u.boss ? 2.2 : 1.4, o.position.y + 1);
+    fx.fire(o.position.x, o.position.z, u.boss ? 14 : 8, u.boss ? 2.5 : 1.4, o.position.y + 1.2);
+    d.life = u.boss ? 18 : 12;
+  }
+  dying.push(d);
+}
+function updateDying(dt) {
+  for (let i = dying.length - 1; i >= 0; i--) {
+    const d = dying[i], o = d.obj;
+    d.t += dt;
+    if (d.human) {
+      const k = Math.min(1, d.t / 0.45);
+      o.rotation.x = d.rx - (Math.PI / 2) * k * k;
+      o.position.y = d.y0 + 0.15 * Math.sin(k * Math.PI);
+    } else if (d.flying) {
+      d.vy -= 9.8 * dt;
+      o.position.y += d.vy * dt;
+      o.rotation.z += dt * 1.5 * d.side;
+      const gy = terrainHeight(o.position.x, o.position.z);
+      if (o.position.y <= gy + 0.5) {
+        fx.explosion(o.position.x, o.position.z, 6, 2); fx.fire(o.position.x, o.position.z, 10, 2.5);
+        o.position.y = gy + 0.5; d.flying = false; d.t = 0; d.life = 14;
+        o.traverse((m) => { if (m.isMesh) m.material = burntMaterial(); });
+      }
+    }
+    if (d.t > d.life - 2) o.position.y -= dt * (d.human ? 0.4 : 0.3);
+    if (d.t > d.life) { world.scene.remove(o); dying.splice(i, 1); }
   }
 }
 function shake(a) { if (settings.shake) world.shake = Math.max(world.shake || 0, a); }
@@ -478,8 +536,20 @@ function moveMe(dt) {
     const dx = me.x - cx, dz = me.z - cz, d = Math.hypot(dx, dz);
     if (d < r && d > 0.001) { me.x = cx + (dx / d) * r; me.z = cz + (dz / d) * r; }
   };
-  push(0, 0, 7.6);
-  for (const t of G.world.towers) push(t.x, t.z, 2.1);
+  push(0, 0, 7.4);
+  for (const c of world.colliders) {
+    const dx = me.x - c.x, dz = me.z - c.z;
+    const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+    const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+    const hw = c.w / 2 + 0.5, hd = c.d / 2 + 0.5;
+    if (Math.abs(lx) < hw && Math.abs(lz) < hd) {
+      const px = hw - Math.abs(lx), pz = hd - Math.abs(lz);
+      let nx = lx, nz = lz;
+      if (px < pz) nx = Math.sign(lx || 1) * hw; else nz = Math.sign(lz || 1) * hd;
+      me.x = c.x + nx * cs + nz * sn; me.z = c.z - nx * sn + nz * cs;
+    }
+  }
+  for (const t of G.world.towers) push(t.x, t.z, t.type === 'howitzer' ? 3.2 : 2.4);
   const c = clampPos(me.x, me.z); me.x = c.x; me.z = c.z;
   me.ax = mouse.world.x; me.az = mouse.world.z;
   me.rot = Math.atan2(me.ax - me.x, me.az - me.z);
@@ -496,6 +566,8 @@ function sendInput(dt) {
 
 // ───────────── оновлення сцени ─────────────
 const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
+function nearestHeroTo(x, z, r) { let b = null, bd = r; for (const h of heroes.values()) { if (!h.obj.visible) continue; const d = Math.hypot(h.x - x, h.z - z); if (d < bd) { bd = d; b = h; } } return b; }
 function lerpAngle(a, b, t) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
 
 function updateEntities(dt, t) {
@@ -510,13 +582,15 @@ function updateEntities(dt, t) {
     h.walk += dt * Math.min(sp, 14) * 0.9;
     const o = h.obj, u = o.userData;
     o.position.set(h.x, terrainHeight(h.x, h.z), h.z);
+    if (h.drone) for (const p of h.drone.userData.props) p.rotation.z += dt * 50;
     o.rotation.y = h.rot;
     const sw = Math.min(1, sp / 6);
-    u.legs[0].rotation.x = Math.sin(h.walk) * 0.7 * sw;
-    u.legs[1].rotation.x = -Math.sin(h.walk) * 0.7 * sw;
-    u.body.position.y = Math.abs(Math.sin(h.walk)) * 0.08 * sw;
+    u.legs[0].rotation.x = Math.sin(h.walk * 0.8) * 0.65 * sw;
+    u.legs[1].rotation.x = -Math.sin(h.walk * 0.8) * 0.65 * sw;
+    u.body.position.y = Math.abs(Math.sin(h.walk * 0.8)) * 0.05 * sw;
     const firing = h.data && h.data.f;
-    u.muzzle.visible = firing && Math.sin(t * 60) > 0;
+    u.muzzle.visible = firing && Math.sin(t * 70) > 0.3;
+    if (firing && Math.random() < dt * 8) { const mp = u.muzzle.getWorldPosition(tmpV2); fx.puff(mp.x, mp.y, mp.z, 0x9a948a, 1, { speed: 0.5, life: 0.8, size: 0.2, size1: 0.9, alpha: 0.3, up: 1 }); }
     u.arms.position.z = firing ? Math.sin(t * 50) * 0.04 : 0;
     u.ring.material.opacity = 0.4 + Math.sin(t * 3) * 0.2;
     if (h.drone) {
@@ -528,62 +602,56 @@ function updateEntities(dt, t) {
   // вороги
   for (const e of enemies.values()) {
     e.x += (e.tx - e.x) * k; e.z += (e.tz - e.z) * k;
-    e.rot = lerpAngle(e.rot, e.trot, k);
+    e.rot = lerpAngle(e.rot, e.trot, e.def.vehicle ? k * 0.5 : k);
     const o = e.obj, u = o.userData;
-    const fly = u.flying;
     const ground = terrainHeight(e.x, e.z);
-    const y = fly ? ground + (u.boss ? 6 : 4) + Math.sin(t * 3 + e.seed) * 0.4 : ground;
+    const fh = e.kind === 'fpv' ? 2.4 : e.kind === 'shahed' ? 7 : e.kind === 'boss_heli' ? 8 : 0;
+    const y = u.flying ? ground + fh + Math.sin(t * 2 + e.seed) * (e.kind === 'fpv' ? 0.3 : 0.6) : ground;
     o.position.set(e.x, y, e.z);
     o.rotation.y = e.rot;
-    const ph = t * (e.def.speed * 1.6) + e.seed;
-    u.legs.forEach((l, i) => (l.rotation.x = Math.sin(ph + i * Math.PI * 0.5 + (i % 2) * Math.PI) * 0.6));
-    if (!fly) u.body.position.y = Math.abs(Math.sin(ph)) * 0.08 * e.def.size;
-    u.wings.forEach((w, i) => {
-      if (u.kind === 'flyer') w.rotation.z = Math.sin(t * 28 + e.seed) * 0.7 * (i ? 1 : -1);
-      else w.rotation.y += dt * (1.5 + i);
-    });
-    if (u.shield) { u.shield.visible = e.sh > 0.02; u.shield.material.opacity = 0.08 + e.sh * 0.18 + Math.sin(t * 6) * 0.03; }
-    if (u.hitFlash > 0) { u.hitFlash -= dt; u.body.scale.setScalar((u.boss ? 1.15 : e.def.size) * 1.06); } else u.body.scale.setScalar(u.boss ? (u.kind === 'boss_sentinel' ? 1 : 1.15) : e.def.size);
-    if (e.slow && Math.random() < dt * 6) fx.emit(e.x, y + 1, e.z, 0x9fd6ff, 1, { speed: 1, life: 0.5, size: 0.5 });
+    const sp = Math.hypot(e.x - (e.px ?? e.x), e.z - (e.pz ?? e.z)) / Math.max(dt, 1e-3);
+    e.px = e.x; e.pz = e.z;
+    if (u.human) {
+      e.walk = (e.walk || e.seed) + dt * Math.min(sp, 8) * 1.6;
+      const sw = Math.min(1, sp / 2);
+      u.legs[0].rotation.x = Math.sin(e.walk) * 0.6 * sw;
+      u.legs[1].rotation.x = -Math.sin(e.walk) * 0.6 * sw;
+      u.body.position.y = Math.abs(Math.sin(e.walk)) * 0.05 * sw;
+    } else if (u.vehicle && !u.flying) {
+      u.body.rotation.x = Math.sin(t * 3 + e.seed) * 0.01 * Math.min(1, sp / 2);
+      if (u.turret) {
+        const nh = nearestHeroTo(e.x, e.z, 25);
+        const tr = nh ? Math.atan2(nh.x - e.x, nh.z - e.z) - e.rot : 0;
+        u.turret.rotation.y = lerpAngle(u.turret.rotation.y, tr, 1 - Math.exp(-dt * 2));
+      }
+    }
+    if (e.kind === 'fpv') o.rotation.x = 0.25;
+    if (e.kind === 'boss_heli') o.rotation.x = 0.08;
+    for (const p of u.props) p.rotation.z += dt * 60;
+    if (u.rotor) u.rotor.rotation.y += dt * 18;
+    if (e.slow && Math.random() < dt * 3) fx.puff(e.x, y + 0.5, e.z, 0x8a7f6a, 1, { speed: 1, life: 0.8, size: 0.4, size1: 1.2, alpha: 0.35 });
+    if ((u.vehicle || u.boss) && e.hp < 0.5 && Math.random() < dt * (u.boss ? 10 : 4)) fx.puff(e.x, y + 2, e.z, 0x2c2926, 1, { speed: 0.6, life: 2.5, size: 0.8, size1: 3, alpha: 0.55, vy: 2 });
   }
   // вежі
   for (const o of towers.values()) {
     const u = o.obj.userData;
-    if (o.trot != null) { o.rot = lerpAngle(o.rot, o.trot, 1 - Math.exp(-dt * 10)); u.head.rotation.y = o.rot; }
-    if (u.type === 'tesla') u.head.rotation.y = t * 0.8;
-    o.recoil = Math.max(0, (o.recoil || 0) - dt * 6);
-    u.head.position.z = 0;
-    u.head.children.forEach(() => {});
-    u.head.position.y = 2.6 - o.recoil * 0.12;
-    // лазер
-    const tgt = o.laserT > 0 ? enemies.get(o.laserT) : null;
-    if (tgt) {
-      if (!o.laser) {
-        o.laser = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8, 1, true).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3388).multiplyScalar(3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-        world.scene.add(o.laser);
-      }
-      const a = u.head.localToWorld(u.muzzles[0].clone());
-      const b = tmpV.set(tgt.x, tgt.obj.position.y + (tgt.obj.userData.flying ? 0 : 1), tgt.z);
-      o.laser.visible = true;
-      o.laser.position.copy(a).lerp(b, 0.5);
-      o.laser.lookAt(b);
-      const w = 0.08 + (o.ramp || 0) * 0.08 + Math.sin(t * 40) * 0.02;
-      o.laser.scale.set(w, w, a.distanceTo(b));
-      if (Math.random() < 0.5) fx.emit(b.x, b.y, b.z, 0xff3388, 1, { speed: 4, life: 0.25, size: 0.6 });
-    } else if (o.laser) o.laser.visible = false;
+    if (o.trot != null) { o.rot = lerpAngle(o.rot, o.trot, 1 - Math.exp(-dt * 6)); u.head.rotation.y = o.rot; }
+    o.recoil = Math.max(0, (o.recoil || 0) - dt * 5);
+    u.head.position.z = -o.recoil * (u.type === 'howitzer' ? 0.35 : 0.06);
   }
   // лут
   for (const l of loots.values()) {
-    l.obj.userData.gem.rotation.y += dt * 2;
-    l.obj.userData.gem.position.y = 1 + Math.sin(t * 2.5) * 0.2;
+    l.obj.userData.gem.material.opacity = 0.18 + Math.sin(t * 2.5) * 0.06 + l.r * 0.04;
   }
   // примара
   if (ghost) {
     const x = snapGrid(mouse.world.x), z = snapGrid(mouse.world.z);
     ghost.position.set(x, 0, z);
     const ok = canBuildAt(x, z) && !G.world.towers.some((tt) => tt.x === x && tt.z === z);
-    const col = ok ? 0x3ae0ff : 0xff3344;
-    ghost.traverse((m) => { if (m.isMesh) m.material.color.setHex(col); });
+    const col = ok ? 0xffffff : 0xff3344;
+    ghost.userData.ghostMat.color.setHex(col);
+    ghost.userData.range.material.color.setHex(col);
+    ghost.position.y = terrainHeight(x, z);
     const r = towerStats(G.buildType, 1, G.world.research).range;
     ghost.userData.range.scale.setScalar(r);
     ghost.userData.fill.scale.setScalar(r);
@@ -594,7 +662,7 @@ function updateEntities(dt, t) {
 const camPos = new THREE.Vector3(0, 40, 30);
 const camLook = new THREE.Vector3();
 function updateCamera(dt) {
-  const h = 30 * zoom, back = 21 * zoom;
+  const h = 25 * zoom, back = 19 * zoom;
   // легкий зсув у бік курсора
   const ox = THREE.MathUtils.clamp((mouse.world.x - me.x) * 0.18, -8, 8);
   const oz = THREE.MathUtils.clamp((mouse.world.z - me.z) * 0.18, -8, 8);
@@ -624,7 +692,7 @@ function drawOverlay(dt) {
   octx.font = '600 12px Bahnschrift, Segoe UI, sans-serif';
   // вороги
   for (const e of enemies.values()) {
-    const top = e.obj.position.y + (e.def.boss ? 9 : 2.6 * e.def.size + (e.def.wild ? 0.5 : 0));
+    const top = e.obj.position.y + (e.def.human ? 2.6 : e.def.flying ? 1.5 : e.def.boss ? 5.5 : 3.2);
     const p = project(e.x, top, e.z);
     if (!p || p[0] < -50 || p[0] > W + 50 || p[1] < -50 || p[1] > H + 50) continue;
     if (e.def.boss) continue; // бос — окрема велика смуга
@@ -632,10 +700,10 @@ function drawOverlay(dt) {
     const w = e.def.wild ? 40 : 30 * Math.max(0.8, e.def.size);
     octx.fillStyle = 'rgba(0,0,0,.6)';
     octx.fillRect(p[0] - w / 2 - 1, p[1] - 1, w + 2, 6);
-    octx.fillStyle = e.def.wild ? '#ffb02e' : '#ff3355';
+    octx.fillStyle = e.def.wild ? '#e0a040' : '#d8463a';
     octx.fillRect(p[0] - w / 2, p[1], w * e.hp, 4);
     if (e.sh >= 0) { octx.fillStyle = '#6aa8ff'; octx.fillRect(p[0] - w / 2, p[1] - 3, w * e.sh, 2); }
-    if (e.def.wild) { octx.fillStyle = '#ffd9a0'; octx.fillText(`${e.def.name} ${e.lvl}`, p[0], p[1] - 5); }
+    if (e.def.wild) { octx.fillStyle = '#ecdcb8'; octx.fillText(`${e.def.name} ${e.lvl}`, p[0], p[1] - 5); }
   }
   // бос: велика смуга вгорі
   const boss = [...enemies.values()].find((e) => e.def.boss);
@@ -644,7 +712,7 @@ function drawOverlay(dt) {
     const x = W / 2 - w / 2, y = 130;
     octx.fillStyle = 'rgba(0,0,0,.7)'; octx.fillRect(x - 2, y - 2, w + 4, 18);
     const gr = octx.createLinearGradient(x, 0, x + w, 0);
-    gr.addColorStop(0, '#a0102a'); gr.addColorStop(1, '#ff3355');
+    gr.addColorStop(0, '#7a1c14'); gr.addColorStop(1, '#d8463a');
     octx.fillStyle = gr; octx.fillRect(x, y, w * boss.hp, 14);
     if (boss.sh >= 0) { octx.fillStyle = '#8a6aff'; octx.fillRect(x, y + 10, w * boss.sh, 4); }
     octx.font = '700 15px Bahnschrift, Segoe UI, sans-serif';
@@ -654,13 +722,13 @@ function drawOverlay(dt) {
   // імена героїв
   for (const [n, h] of heroes) {
     if (!h.obj.visible) continue;
-    const p = project(h.x, h.obj.position.y + 3.2, h.z);
+    const p = project(h.x, h.obj.position.y + 2.9, h.z);
     if (!p) continue;
     octx.fillStyle = hex(h.color);
     octx.fillText(`${n} · ${h.data?.l ?? ''}`, p[0], p[1] - 8);
     if (n !== G.name && h.data) {
       octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillRect(p[0] - 21, p[1] - 4, 42, 5);
-      octx.fillStyle = '#4dff7a'; octx.fillRect(p[0] - 20, p[1] - 3, 40 * (h.data.hp / h.data.mhp), 3);
+      octx.fillStyle = '#9ccf6a'; octx.fillRect(p[0] - 20, p[1] - 3, 40 * (h.data.hp / h.data.mhp), 3);
     }
   }
   // мітки таборів і родовищ
@@ -670,25 +738,34 @@ function drawOverlay(dt) {
     const p = project(c.x, terrainHeight(c.x, c.z) + 6, c.z);
     if (!p) return;
     const lv = G.world.camps[i]?.level ?? 1;
-    octx.fillStyle = 'rgba(255,170,60,.85)';
-    octx.fillText(`☠ Табір · рів. ${lv}`, p[0], p[1]);
+    octx.fillStyle = 'rgba(236,190,110,.9)';
+    octx.fillText(`⌖ Позиція ДРГ · рів. ${lv}`, p[0], p[1]);
   });
   DEPOSITS.forEach((d, i) => {
     if (Math.hypot(d.x - me.x, d.z - me.z) > 55) return;
     const p = project(d.x, terrainHeight(d.x, d.z) + 10, d.z);
     if (!p) return;
     const lv = G.world.extractors[i]?.level || 0;
-    octx.fillStyle = 'rgba(195,140,255,.95)';
-    octx.fillText(lv ? `◆ Шахта · рів. ${lv}` : '◆ Родовище кристалів', p[0], p[1]);
+    octx.fillStyle = 'rgba(190,210,220,.95)';
+    octx.fillText(lv ? `⚙ Майстерня · рів. ${lv}` : '⚙ Покинутий склад [F]', p[0], p[1]);
   });
+  // підписи вогневих позицій поруч
+  octx.font = '600 11px Bahnschrift, Segoe UI, sans-serif';
+  for (const o of towers.values()) {
+    if (Math.hypot(o.data.x - me.x, o.data.z - me.z) > 28) continue;
+    const p = project(o.data.x, terrainHeight(o.data.x, o.data.z) + 3.6, o.data.z);
+    if (!p) continue;
+    octx.fillStyle = 'rgba(235,230,214,.8)';
+    octx.fillText(`${TOWERS[o.data.type].name} · рів. ${o.data.level}`, p[0], p[1]);
+  }
   // вибрана вежа
   if (ui.selTower) {
     const t = towers.get(ui.selTower);
     if (t) {
       const r = towerStats(t.data.type, t.data.level, G.world.research).range;
       const pts = [];
-      for (let i = 0; i <= 64; i++) { const a = (i / 64) * Math.PI * 2; pts.push(project(t.data.x + Math.cos(a) * r, 0.2, t.data.z + Math.sin(a) * r)); }
-      octx.strokeStyle = 'rgba(58,224,255,.7)'; octx.lineWidth = 2; octx.beginPath();
+      for (let i = 0; i <= 64; i++) { const a = (i / 64) * Math.PI * 2; pts.push(project(t.data.x + Math.cos(a) * r, terrainHeight(t.data.x + Math.cos(a) * r, t.data.z + Math.sin(a) * r) + 0.2, t.data.z + Math.sin(a) * r)); }
+      octx.strokeStyle = 'rgba(255,240,200,.7)'; octx.lineWidth = 2; octx.beginPath();
       pts.forEach((p, i) => p && (i ? octx.lineTo(p[0], p[1]) : octx.moveTo(p[0], p[1])));
       octx.stroke();
     }
@@ -727,31 +804,32 @@ function drawMap(cv, R = 132, focus = null) {
   c.clearRect(0, 0, S, S);
   c.save();
   c.beginPath(); c.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); c.clip();
-  c.fillStyle = 'rgba(8,14,26,.95)'; c.fillRect(0, 0, S, S);
+  c.fillStyle = 'rgba(40,44,30,.95)'; c.fillRect(0, 0, S, S);
   // база
   let [bx, bz] = P(0, 0);
-  c.fillStyle = 'rgba(58,224,255,.12)'; c.beginPath(); c.arc(bx, bz, BASE_R * sc, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(120,110,80,.5)'; c.beginPath(); c.arc(bx, bz, BASE_R * sc, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(90,90,85,.6)'; for (const b of world.colliders) { const [qx, qz] = P(b.x, b.z); c.save(); c.translate(qx, qz); c.rotate(-b.rot); c.fillRect(-b.w * sc / 2, -b.d * sc / 2, b.w * sc, b.d * sc); c.restore(); }
   // дороги
-  c.strokeStyle = 'rgba(255,70,90,.6)'; c.lineWidth = Math.max(2, 4 * sc);
+  c.strokeStyle = 'rgba(150,125,90,.85)'; c.lineWidth = Math.max(2, 4 * sc);
   for (const l of LANES) { c.beginPath(); l.forEach(([x, z], i) => { const [px, pz] = P(x, z); i ? c.lineTo(px, pz) : c.moveTo(px, pz); }); c.stroke(); }
   // родовища
-  DEPOSITS.forEach((d, i) => { const [x, z] = P(d.x, d.z); c.fillStyle = G.world.extractors[i]?.level ? '#c38cff' : 'rgba(195,140,255,.35)'; c.fillRect(x - 4, z - 4, 8, 8); });
+  DEPOSITS.forEach((d, i) => { const [x, z] = P(d.x, d.z); c.fillStyle = G.world.extractors[i]?.level ? '#d8dccc' : 'rgba(216,220,204,.35)'; c.fillRect(x - 4, z - 4, 8, 8); });
   // табори
   c.font = `600 ${S > 300 ? 15 : 9}px Bahnschrift, sans-serif`; c.textAlign = 'center';
-  CAMPS.forEach((cp, i) => { const [x, z] = P(cp.x, cp.z); c.fillStyle = ['#ff9944', '#ff6633', '#ff3366', '#ffcc22'][cp.tier]; c.beginPath(); c.arc(x, z, 3.5, 0, Math.PI * 2); c.fill(); if (S > 300) c.fillText(G.world.camps[i]?.level ?? '', x, z - 7); });
+  CAMPS.forEach((cp, i) => { const [x, z] = P(cp.x, cp.z); c.fillStyle = ['#e0a040', '#d88030', '#c85a30', '#b03a28'][cp.tier]; c.beginPath(); c.arc(x, z, 3.5, 0, Math.PI * 2); c.fill(); if (S > 300) c.fillText(G.world.camps[i]?.level ?? '', x, z - 7); });
   // вежі
   for (const t of G.world.towers) { const [x, z] = P(t.x, t.z); c.fillStyle = hex(TOWERS[t.type].color); c.fillRect(x - 2, z - 2, 4, 4); }
   // вороги
   for (const e of enemies.values()) {
     const [x, z] = P(e.x, e.z);
-    c.fillStyle = e.def.wild ? 'rgba(255,170,60,.8)' : e.def.boss ? '#ff00ff' : '#ff3355';
+    c.fillStyle = e.def.wild ? 'rgba(224,160,64,.85)' : e.def.boss ? '#ff4030' : '#d8463a';
     c.beginPath(); c.arc(x, z, e.def.boss ? 6 : 2, 0, Math.PI * 2); c.fill();
   }
   // лут
   for (const l of loots.values()) { const [x, z] = P(l.obj.position.x, l.obj.position.z); c.fillStyle = RARITIES[l.r].color; c.fillRect(x - 2, z - 2, 4, 4); }
   // ядро
   [bx, bz] = P(0, 0);
-  c.fillStyle = '#3ae0ff'; c.beginPath(); c.arc(bx, bz, 5, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#e8dcb8'; c.fillRect(bx - 5, bz - 5, 10, 10);
   // герої
   for (const [n, h] of heroes) {
     const [x, z] = P(h.x, h.z);
@@ -782,7 +860,7 @@ function frame(now) {
   try { frameBody(now); } catch (e) { if (!frame.err) { frame.err = 1; console.error('frame error', e.message, e.stack); } }
 }
 function frameBody(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   const t = now / 1000;
   if (G.snap) {
@@ -807,6 +885,8 @@ function frameBody(now) {
     world.camera.lookAt(0, 4, 0);
   }
   world.update(dt, me);
+  updateDying(dt);
+  if (world.coreDamage > 0.3 && Math.random() < dt * world.coreDamage * 8) fx.puff((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4, 0x2c2926, 1, { speed: 0.5, life: 4, size: 1, size1: 4, alpha: 0.6, vy: 2.5 });
   fx.update(dt);
   world.render();
   drawOverlay(dt);

@@ -2,7 +2,7 @@
 <html lang="uk">
 <head>
   <meta charset="utf-8" />
-  <title>Неоновий Бастіон</title>
+  <title>Останній рубіж</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <script type="importmap">
@@ -17,8 +17,8 @@
   <div id="lobby">
     <div class="lobby-bg"></div>
     <div class="lobby-box">
-      <div class="logo">НЕОНОВИЙ <span>БАСТІОН</span></div>
-      <div class="sub">кооперативна оборона форпосту · до 3 гравців</div>
+      <div class="logo">ОСТАННІЙ <span>РУБІЖ</span></div>
+      <div class="sub">кооперативна оборона позиції · до 3 гравців</div>
       <div id="lobby-status">З’єднання з сервером…</div>
       <div id="setup" class="hidden">
         <div id="save-info"></div>
@@ -42,8 +42,8 @@
         <div class="hint warn hidden" id="new-warn">Нова гра перезапише поточне збереження (резервна копія лишиться в папці збережень).</div>
       </div>
       <div class="controls-help">
-        <b>WASD</b> рух · <b>ЛКМ</b> стрільба · <b>Q</b> ривок · <b>E</b> граната · <b>R</b> орбітальний удар<br />
-        <b>1–6</b> будувати вежі · <b>ПКМ</b> скасувати · <b>F</b> шахта · <b>G</b> готові · <b>Tab</b> герой · <b>K</b> таланти · <b>J</b> дослідження · <b>M</b> карта · <b>Enter</b> чат · <b>Esc</b> меню
+        <b>WASD</b> рух · <b>ЛКМ</b> стрільба · <b>Q</b> ривок · <b>E</b> граната · <b>R</b> артудар<br />
+        <b>1–6</b> вогневі позиції · <b>ПКМ</b> скасувати · <b>F</b> майстерня · <b>G</b> готові · <b>Tab</b> герой · <b>K</b> таланти · <b>J</b> модернізація · <b>M</b> карта · <b>Enter</b> чат · <b>Esc</b> меню
       </div>
     </div>
   </div>
@@ -51,13 +51,14 @@
   <!-- HUD -->
   <div id="hud" class="hidden">
     <div id="res">
-      <div class="res credits"><i>◈</i><span id="credits">0</span><small>кредити</small></div>
-      <div class="res crystals"><i>◆</i><span id="crystals">0</span><small>кристали</small></div>
+      <div class="res credits"><i>₴</i><span id="credits">0</span><small>кошти</small></div>
+      <div class="res crystals"><i>⚙</i><span id="crystals">0</span><small>запчастини</small></div>
     </div>
     <div id="wave-box">
       <div id="wave-num">ХВИЛЯ 1</div>
       <div id="wave-phase">Підготовка</div>
-      <div class="core-bar"><div id="core-fill"></div><span id="core-text">Ядро</span></div>
+      <div class="core-bar"><div id="core-fill"></div><span id="core-text">Штаб</span></div>
+      <div id="wx"></div>
       <button id="ready-btn">Готові до бою <kbd>G</kbd></button>
     </div>
     <div id="team"></div>
@@ -83,7 +84,7 @@
     <div class="tabs" id="tabs">
       <button data-tab="hero">Герой <kbd>Tab</kbd></button>
       <button data-tab="talents">Таланти <kbd>K</kbd></button>
-      <button data-tab="research">Дослідження <kbd>J</kbd></button>
+      <button data-tab="research">Модернізація <kbd>J</kbd></button>
       <button data-tab="stats">Статистика</button>
       <button data-tab="settings">Налаштування <kbd>Esc</kbd></button>
       <button class="close" id="panel-close">✕</button>

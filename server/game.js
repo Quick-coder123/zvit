@@ -7,9 +7,10 @@ import {
   DIFFICULTY, waveHpMul, waveDmgMul, bountyMul, waveComposition, wildStats, towerStats, towerUpgradeCost,
   canBuildAt, snap, EXTRACTOR_COST, extractorUpgradeCost, extractorRate, RESEARCH, researchCost,
   TALENTS, xpToNext, heroStats, newHeroProfile, genItem, itemValue, itemSalvage, ABILITIES, HERO_COLORS, SLOTS,
+  SEASONS, seasonOf, WEATHER, SEASON_WEATHER,
 } from '../shared/data.js';
 
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 const INV_MAX = 40;
 
 function rng(seed) {
@@ -104,6 +105,7 @@ export class Game {
     this.coreHp = this.coreMax;
     this.campState = CAMPS.map(() => ({ alive: new Set(), respawn: 0 }));
     this.running = true;
+    if (!this.w.weather) this.rollWeather(false);
     for (const c of this.campState.keys()) this.spawnCamp(c);
     this.broadcastWorld();
     this.msg(`Гру запущено. Складність: ${DIFFICULTY[this.w.cfg.difficulty].name}. Хвиля ${this.w.wave}.`, '#3ae0ff');
@@ -239,7 +241,7 @@ export class Game {
     if (!canBuildAt(x, z)) return;
     for (const t of this.towers.values()) if (t.x === x && t.z === z) return;
     const cost = Math.round(def.cost * (1 - this.thrift()));
-    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо кредитів.', color: '#f66' });
+    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо коштів.', color: '#f66' });
     this.w.credits -= cost;
     this.addTower(type, x, z, 1, cost);
     this.events.push({ e: 'build', x, z });
@@ -249,7 +251,7 @@ export class Game {
     const t = this.towers.get(id);
     if (!t || t.level >= TOWER_MAX_LVL) return;
     const cost = Math.round(towerUpgradeCost(t.type, t.level) * (1 - this.thrift()));
-    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо кредитів.', color: '#f66' });
+    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо коштів.', color: '#f66' });
     this.w.credits -= cost; t.spent += cost; t.level++;
     this.events.push({ e: 'up', x: t.x, z: t.z });
     this.broadcastWorld();
@@ -266,7 +268,7 @@ export class Game {
     const ex = this.w.extractors[id];
     if (!ex) return;
     const cost = ex.level === 0 ? EXTRACTOR_COST : extractorUpgradeCost(ex.level);
-    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо кредитів.', color: '#f66' });
+    if (this.w.credits < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо коштів.', color: '#f66' });
     const d = DEPOSITS[id];
     if (Math.hypot(h.x - d.x, h.z - d.z) > 14) return this.send(h.ws, { t: 'msg', text: 'Підійдіть ближче до родовища.', color: '#f66' });
     this.w.credits -= cost; ex.level++;
@@ -280,7 +282,7 @@ export class Game {
     if (lvl >= r.max) return;
     if (r.req && !this.w.research[r.req]) return;
     const cost = researchCost(id, lvl);
-    if (this.w.crystals < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо кристалів.', color: '#f66' });
+    if (this.w.crystals < cost) return this.send(h.ws, { t: 'msg', text: 'Недостатньо запчастин.', color: '#f66' });
     this.w.crystals -= cost;
     this.w.research[id] = lvl + 1;
     const oldMax = this.coreMax;
@@ -289,6 +291,18 @@ export class Game {
     this.msg(`Дослідження: ${r.name} → рівень ${lvl + 1}`, '#c057ff');
     for (const p of this.players()) p.dirty = true;
     this.broadcastWorld();
+  }
+  wx() { return WEATHER[this.w.weather?.kind] || WEATHER.clear; }
+  rollWeather(announce = true) {
+    const table = SEASON_WEATHER[seasonOf(this.w.wave)];
+    const total = Object.values(table).reduce((a, b) => a + b, 0);
+    let r = rand() * total, kind = 'clear';
+    for (const [k, v] of Object.entries(table)) { r -= v; if (r <= 0) { kind = k; break; } }
+    this.w.weather = { kind, t: 150 + rand() * 180 };
+    if (announce) {
+      const W = WEATHER[kind];
+      this.msg(`Погода: ${W.name}${W.desc ? ' — ' + W.desc : ''}`, '#9cc3d9');
+    }
   }
   calcCoreMax() { return 1000 * (1 + 0.15 * (this.w.research.r_core || 0)); }
 
@@ -309,7 +323,7 @@ export class Game {
     const spent = Object.values(h.profile.talents).reduce((s, v) => s + v, 0);
     const cost = 20 + spent * 5;
     if (!spent) return;
-    if (this.w.crystals < cost) return this.send(h.ws, { t: 'msg', text: `Скидання талантів коштує ${cost} кристалів.`, color: '#f66' });
+    if (this.w.crystals < cost) return this.send(h.ws, { t: 'msg', text: `Скидання талантів коштує ${cost} запчастин.`, color: '#f66' });
     this.w.crystals -= cost;
     h.profile.talents = {}; h.profile.points += spent; h.dirty = true;
   }
@@ -352,7 +366,7 @@ export class Game {
     }
     h.profile.inv = keep;
     if (salvage) this.w.crystals += got; else this.w.credits += got;
-    this.send(h.ws, { t: 'msg', text: salvage ? `Розібрано: +${got} кристалів` : `Продано: +${got} кредитів`, color: '#4dff7a' });
+    this.send(h.ws, { t: 'msg', text: salvage ? `Розібрано: +${got} запчастин` : `Продано: +${got} ₴`, color: '#4dff7a' });
     h.dirty = true;
   }
   giveXp(h, amount) {
@@ -451,7 +465,7 @@ export class Game {
       bounty: d.bounty * bountyMul(w, diff), xp: d.xp * (1 + 0.12 * (w - 1)) * Math.pow(1.03, w - 1),
     });
     if (d.boss) {
-      this.msg(`⚠ БОС: ${d.name} наближається!`, '#ff3355');
+      this.msg(`⚠ Увага: ${d.name} наближається!`, '#ff3355');
       this.events.push({ e: 'boss', k: kind });
     }
     return e;
@@ -462,8 +476,8 @@ export class Game {
     const st = this.campState[ci];
     const n = 3 + c.tier;
     const kinds = [];
-    for (let i = 0; i < n; i++) kinds.push(i % 3 === 2 ? 'w_spitter' : 'w_mutant');
-    if (c.tier >= 1 || lvl >= 4) kinds[0] = 'w_alpha';
+    for (let i = 0; i < n; i++) kinds.push(i % 3 === 2 ? 'w_mg' : 'w_rifle');
+    if (c.tier >= 1 || lvl >= 4) kinds[0] = 'w_officer';
     for (const k of kinds) {
       const s = wildStats(k, lvl);
       const a = rand() * Math.PI * 2, r = rand() * 5;
@@ -475,7 +489,7 @@ export class Game {
     }
   }
 
-  hit(e, dmg, h, canCrit = true, fromTower = false) {
+  hit(e, dmg, h, canCrit = true, fromTower = false, ap = false) {
     if (!this.enemies.has(e.id)) return 0;
     let crit = false;
     if (h && canCrit && rand() < h.stats.crit) { dmg *= h.stats.critMul; crit = true; }
@@ -484,7 +498,7 @@ export class Game {
       e.shield -= s; dmg -= s;
       e.shieldCd = 3;
     }
-    const real = Math.max(dmg * 0.15, dmg - e.armor);
+    const real = ap ? dmg : Math.max(dmg * 0.15, dmg - e.armor);
     e.hp -= real;
     if (h) {
       if (h.stats.leech > 0 && !h.dead) h.hp = Math.min(h.stats.maxHp, h.hp + real * h.stats.leech);
@@ -510,7 +524,7 @@ export class Game {
     if (h) h.profile.kills++;
     // лут
     const luck = (res.r_luck || 0);
-    let chance = e.boss ? 1 : e.kind === 'w_alpha' ? 0.6 : e.wild ? 0.13 : 0.015;
+    let chance = e.boss ? 1 : e.kind === 'w_officer' ? 0.6 : e.wild ? 0.13 : 0.015;
     chance *= 1 + 0.1 * luck;
     const drops = e.boss ? 3 : 1;
     for (let i = 0; i < drops; i++) {
@@ -526,7 +540,7 @@ export class Game {
     if (e.boss) {
       this.w.stats.bosses++;
       this.w.crystals += 40 + this.w.wave * 3;
-      this.msg(`★ Боса «${ENEMIES[e.kind].name}» знищено! +${40 + this.w.wave * 3} кристалів`, '#ffa02a');
+      this.msg(`★ «${ENEMIES[e.kind].name}» знищено! +${40 + this.w.wave * 3} запчастин`, '#ffa02a');
       if (h) h.profile.bossKills++;
     }
     if (e.camp >= 0) {
@@ -559,8 +573,15 @@ export class Game {
     this.w.credits += bonus;
     this.w.crystals += 2 + Math.floor(w / 2);
     this.w.stats.bestWave = Math.max(this.w.stats.bestWave, w);
-    this.msg(`Хвилю ${w} відбито! +${bonus} кредитів, +${2 + Math.floor(w / 2)} кристалів`, '#4dff7a');
+    this.msg(`Хвилю ${w} відбито! +${bonus} ₴, +${2 + Math.floor(w / 2)} запчастин`, '#4dff7a');
+    const oldSeason = seasonOf(this.w.wave);
     this.w.wave++;
+    if (seasonOf(this.w.wave) !== oldSeason) {
+      const S = SEASONS[seasonOf(this.w.wave)];
+      this.msg(`Настала ${S.name.toLowerCase()}.`, '#e8d9a8');
+      this.events.push({ e: 'season', s: seasonOf(this.w.wave) });
+      this.rollWeather();
+    }
     this.phase = 'prep';
     this.timer = this.w.cfg.prepTime;
     this.events.push({ e: 'clear' });
@@ -576,7 +597,7 @@ export class Game {
     this.phase = 'prep';
     this.timer = this.w.cfg.prepTime;
     this.events.push({ e: 'defeat' });
-    this.msg(`ЯДРО ВПАЛО! Втрачено ${lc} кредитів і ${lx} кристалів. Хвиля ${this.w.wave} повториться.`, '#ff3355');
+    this.msg(`ШТАБ ЗНИЩЕНО! Втрачено ${lc} ₴ і ${lx} запчастин. Хвиля ${this.w.wave} повториться.`, '#ff3355');
     this.save();
   }
 
@@ -597,6 +618,10 @@ export class Game {
       if (t.t <= 0) { this.timers.splice(i, 1); t.fn(); }
     }
 
+    // погода
+    this.w.weather.t -= dt;
+    if (this.w.weather.t <= 0) this.rollWeather();
+
     // економіка
     this.w.credits += (1 + (res.r_income || 0)) * dt;
     for (const ex of this.w.extractors) this.w.crystals += extractorRate(ex.level, res) * dt;
@@ -612,7 +637,7 @@ export class Game {
       if (allReady && this.timer > 3) {
         const bonus = Math.round(this.timer * 1.5 * bountyMul(this.w.wave, this.w.cfg.difficulty));
         this.w.credits += bonus;
-        this.msg(`Достроковий старт: +${bonus} кредитів`, '#ffd23a');
+        this.msg(`Достроковий старт: +${bonus} ₴`, '#ffd23a');
         this.timer = 0;
       }
       if (this.timer <= 0) this.startWave();
@@ -621,9 +646,9 @@ export class Game {
       if (this.spawnQueue.length && this.spawnCd <= 0) {
         const kind = this.spawnQueue.shift();
         const lane = this.spawnIdx++ % 3;
-        if (kind === 'swarm') {
-          for (let i = 0; i < 5 && this.spawnQueue[0] === 'swarm'; i++) this.spawnQueue.shift();
-          for (let i = 0; i < 5; i++) this.spawnWaveEnemy('swarm', lane);
+        if (kind === 'fpv') {
+          for (let i = 0; i < 4 && this.spawnQueue[0] === 'fpv'; i++) this.spawnQueue.shift();
+          for (let i = 0; i < 5; i++) this.spawnWaveEnemy('fpv', lane);
         } else this.spawnWaveEnemy(kind, lane);
         this.spawnCd = Math.max(0.22, 0.65 - this.w.wave * 0.006);
       }
@@ -668,7 +693,8 @@ export class Game {
           if (t) {
             h.droneCd = 0.5;
             const dx = h.x - 1.6, dz = h.z - 1.2;
-            this.events.push({ e: 'beam', k: 'drone', a: [r1(dx), 3.2, r1(dz)], b: [r1(t.x), 1, r1(t.z)] });
+            this.events.push({ e: 'drop', a: [r1(dx), r1(dz)], x: r1(t.x), z: r1(t.z) });
+            void dx; void dz;
             this.hit(t, h.stats.droneDmg, h, true);
           }
         }
@@ -724,7 +750,7 @@ export class Game {
     const w = this.w.wave, diff = this.w.cfg.difficulty;
     for (const e of [...this.enemies.values()]) {
       const def = ENEMIES[e.kind];
-      let sp = e.speed;
+      let sp = e.speed * (e.flying ? this.wx().air : (e.wild ? 1 : this.wx().ground));
       if (e.slowT > 0) { e.slowT -= dt; sp *= 1 - e.slowF; }
       if (e.maxShield > 0) {
         e.shieldCd -= dt;
@@ -762,8 +788,12 @@ export class Game {
       }
       // ближній бій з героями
       if (def.melee && e.atkCd <= 0) {
-        const h = this.nearestHero(e.x, e.z, 2 + e.size * 0.7, players);
-        if (h) { e.atkCd = 1.2; this.damageHero(h, e.dmg); this.events.push({ e: 'swing', x: r1(e.x), z: r1(e.z), s: e.size }); }
+        const h = this.nearestHero(e.x, e.z, def.reach || 2 + e.size * 0.7, players);
+        if (h) {
+          e.atkCd = def.reach ? 0.9 : 1.2;
+          this.damageHero(h, e.dmg);
+          this.events.push({ e: 'eshot', a: [r1(e.x), r1(e.z)], b: [r1(h.x), r1(h.z)], y: e.flying ? 6 : 2 + e.size * 0.6, k: def.reach ? 'mg' : 'rifle' });
+        }
       }
       // медик
       if (def.heal && e.abCd <= 0) {
@@ -775,24 +805,33 @@ export class Game {
       }
       // боси
       if (e.boss && e.abCd <= 0) {
-        if (e.kind === 'boss_titan') {
-          e.abCd = 7;
-          this.events.push({ e: 'stomp', x: r1(e.x), z: r1(e.z), r: 11 });
-          for (const h of players) if (!h.dead && Math.hypot(h.x - e.x, h.z - e.z) < 11) this.damageHero(h, e.dmg * 1.8);
-          if (e.hp < e.maxHp * 0.3) e.speed = ENEMIES.boss_titan.speed * 1.6;
-        } else if (e.kind === 'boss_hive') {
-          e.abCd = 5;
-          for (let i = 0; i < 5; i++) {
-            const s = this.spawnWaveEnemy('swarm', e.lane);
-            s.x = e.x + (rand() - 0.5) * 4; s.z = e.z + (rand() - 0.5) * 4; s.wp = e.wp;
-          }
-          this.events.push({ e: 'heal', x: r1(e.x), z: r1(e.z) });
-        } else if (e.kind === 'boss_sentinel') {
-          e.abCd = 1.6;
+        if (e.kind === 'boss_heavy') {
+          e.abCd = 6;
+          // залп головного калібру по найближчому бійцю
           const h = this.nearestHero(e.x, e.z, 30, players);
           if (h) {
+            const tx = h.x, tz = h.z;
+            this.events.push({ e: 'eshot', a: [r1(e.x), r1(e.z)], b: [r1(tx), r1(tz)], y: 3, k: 'cannon' });
+            this.later(0.25, () => {
+              this.events.push({ e: 'boom', x: r1(tx), z: r1(tz), r: 6, k: 'shell' });
+              for (const p of this.players()) if (!p.dead && Math.hypot(p.x - tx, p.z - tz) < 6) this.damageHero(p, e.dmg * 1.8);
+            });
+          }
+          if (e.hp < e.maxHp * 0.3) e.speed = ENEMIES.boss_heavy.speed * 1.5;
+        } else if (e.kind === 'boss_transport') {
+          e.abCd = 6;
+          for (let i = 0; i < 4; i++) {
+            const s = this.spawnWaveEnemy('infantry', e.lane);
+            s.x = e.x + (rand() - 0.5) * 5; s.z = e.z + (rand() - 0.5) * 5; s.wp = e.wp;
+          }
+          this.events.push({ e: 'unload', x: r1(e.x), z: r1(e.z) });
+        } else if (e.kind === 'boss_heli') {
+          e.abCd = 1.4;
+          const h = this.nearestHero(e.x, e.z, 34, players);
+          if (h) {
             const ddx = h.x - e.x, ddz = h.z - e.z, dd = Math.hypot(ddx, ddz) || 1;
-            this.addProjectile({ k: 'evil', x: e.x, y: 4, z: e.z, vx: ddx / dd * 26, vy: -4 / (dd / 26), vz: ddz / dd * 26, ttl: dd / 26 + 0.2, dmg: e.dmg, owner: null, hostile: true });
+            const sp = 34;
+            this.addProjectile({ k: 'rocket', x: e.x, y: 7, z: e.z, vx: ddx / dd * sp, vy: -7 / (dd / sp), vz: ddz / dd * sp, ttl: dd / sp, dmg: e.dmg, owner: null, hostile: true, blast: 3.5 });
           }
         }
       }
@@ -820,22 +859,16 @@ export class Game {
     const h = e.target;
     if (!h || h.dead || !this.clients.has(h.ws) || home > 32) { e.state = 'leash'; e.target = null; return; }
     const d = Math.hypot(h.x - e.x, h.z - e.z);
-    if (def.ranged) {
-      if (d > 13) this.moveTo(e, h.x, h.z, sp, dt);
-      else e.rot = Math.atan2(h.x - e.x, h.z - e.z);
-      if (d < 15 && e.atkCd <= 0) {
-        e.atkCd = 1.8;
-        const dx = h.x - e.x, dz = h.z - e.z;
-        this.addProjectile({ k: 'acid', x: e.x, y: 1.2, z: e.z, vx: dx / d * 22, vy: 0, vz: dz / d * 22, ttl: d / 22 + 0.3, dmg: e.dmg, owner: null, hostile: true });
-      }
-    } else {
-      const reach = 1.4 + e.size * 0.6;
-      if (d > reach) this.moveTo(e, h.x, h.z, sp, dt);
-      else if (e.atkCd <= 0) {
-        e.atkCd = e.kind === 'w_alpha' ? 1.5 : 1.1;
-        this.damageHero(h, e.dmg);
-        this.events.push({ e: 'swing', x: r1(e.x), z: r1(e.z), s: e.size });
-      }
+    const range = def.range || 14;
+    if (d > range * 0.85) this.moveTo(e, h.x, h.z, sp, dt);
+    else e.rot = Math.atan2(h.x - e.x, h.z - e.z);
+    if (d < range && e.atkCd <= 0) {
+      e.atkCd = def.burst ? 0.35 : e.kind === 'w_officer' ? 1.1 : 0.9;
+      if (def.burst) { e.burstN = (e.burstN || 0) + 1; if (e.burstN % 5 === 0) e.atkCd = 2.2; }
+      const dx = h.x - e.x, dz = h.z - e.z, sp2 = 48;
+      const spread = (rand() - 0.5) * 0.12;
+      const vx = (dx / d) * Math.cos(spread) - (dz / d) * Math.sin(spread), vz = (dz / d) * Math.cos(spread) + (dx / d) * Math.sin(spread);
+      this.addProjectile({ k: 'ebullet', x: e.x, y: 1.4, z: e.z, vx: vx * sp2, vy: 0, vz: vz * sp2, ttl: range / sp2 + 0.1, dmg: e.dmg, owner: null, hostile: true });
     }
   }
   alertCamp(e, h) {
@@ -863,85 +896,54 @@ export class Game {
       for (const h of auraHeroes) if (Math.hypot(h.x - t.x, h.z - t.z) < 22) aura = Math.max(aura, h.stats.towerAura);
       const dmg = st.dmg * (1 + aura);
       t.aura = aura > 0;
-      // ціль – найдальше просунутий ворог у радіусі
-      let target = null, best = -1;
-      if (t.type === 'laser' && t.target > 0) {
-        const cur = this.enemies.get(t.target);
-        if (cur && Math.hypot(cur.x - t.x, cur.z - t.z) <= st.range) target = cur;
+      const range = st.range * this.wx().range;
+      // цілі — найдальше просунуті вороги в радіусі
+      const cands = [];
+      for (const e of this.enemies.values()) {
+        if (e.wild) continue;
+        if (def.ground && e.flying) continue;
+        const d = Math.hypot(e.x - t.x, e.z - t.z);
+        if (d > range || (def.minRange && d < def.minRange)) continue;
+        let score = e.prog + (e.boss ? 1000 : 0);
+        if (def.airMul && e.flying) score += 500;
+        if (def.heavyMul && ENEMIES[e.kind].vehicle) score += 300;
+        cands.push([score, e]);
       }
-      if (!target) {
-        for (const e of this.enemies.values()) {
-          if (e.wild) continue;
-          if (def.ground && e.flying) continue;
-          const d = Math.hypot(e.x - t.x, e.z - t.z);
-          if (d > st.range || (def.minRange && d < def.minRange)) continue;
-          const score = e.prog + (e.boss ? 1000 : 0);
-          if (score > best) { best = score; target = e; }
-        }
-      }
-      if (!target) { t.target = -1; t.ramp = 0; continue; }
+      if (!cands.length) { t.target = -1; continue; }
+      cands.sort((a, b) => b[0] - a[0]);
+      const target = cands[0][1];
       t.rot = Math.atan2(target.x - t.x, target.z - t.z);
-      if (t.type === 'laser') {
-        if (t.target !== target.id) { t.ramp = 0; t.target = target.id; }
-        t.ramp = Math.min(def.ramp, t.ramp + dt * 0.8);
-        this.hit(target, dmg * (1 + t.ramp) * dt, null, false, true);
-        continue;
-      }
       t.target = target.id;
       t.cd -= dt;
       if (t.cd > 0) continue;
-      t.cd = 1 / st.rate;
-      const ty = 3.2;
-      const ey = target.flying ? 4 : 0.9;
+      t.cd = (1 / st.rate) * (0.9 + rand() * 0.2);
+      const ty = 1.6;
+      const fire = (tg, k, speed, extra = {}) => {
+        const ey = tg.flying ? (ENEMIES[tg.kind].low ? 2.5 : 6) : 1;
+        const dx = tg.x - t.x, dz = tg.z - t.z, d = Math.hypot(dx, dz);
+        const T = Math.hypot(d, ey - ty) / speed;
+        this.addProjectile({ k, x: t.x, y: ty, z: t.z, vx: dx / T, vy: (ey - ty) / T, vz: dz / T, ttl: T + 0.05, owner: null, homing: tg.id, ...extra });
+      };
+      const arc = (tg, k, T, extra) => {
+        const g = 30;
+        const lead = Math.min(1, T * 0.8);
+        const tx = tg.x + (tg.x - (tg.px ?? tg.x)) * 0, tz = tg.z;
+        void lead;
+        this.addProjectile({ k, x: t.x, y: ty + 0.8, z: t.z, vx: (tx - t.x) / T, vy: (0 - ty - 0.8) / T + 0.5 * g * T, vz: (tz - t.z) / T, ttl: T, owner: null, g, ...extra });
+      };
       switch (t.type) {
-        case 'blaster': {
-          const dx = target.x - t.x, dz = target.z - t.z, d = Math.hypot(dx, dz);
-          const dy = ey - ty;
-          const sp = 55;
-          const T = Math.hypot(d, dy) / sp;
-          this.addProjectile({ k: 'blaster', x: t.x, y: ty, z: t.z, vx: dx / T, vy: dy / T, vz: dz / T, ttl: T + 0.05, dmg, owner: null, homing: target.id });
-          break;
-        }
-        case 'cryo': {
-          this.events.push({ e: 'beam', k: 'cryo', a: [t.x, ty, t.z], b: [r1(target.x), ey, r1(target.z)] });
-          for (const e of [...this.enemies.values()]) {
-            if (e.wild || Math.hypot(e.x - target.x, e.z - target.z) > st.splash) continue;
-            e.slowT = def.slowT; e.slowF = e.boss ? st.slow * 0.5 : st.slow;
-            this.hit(e, dmg, null, false, true);
+        case 'mg': fire(target, 'bullet', 90, { dmg }); break;
+        case 'ags': arc(target, 'agsg', 0.8, { dmg, splash: st.splash, slow: st.slow, slowT: def.slowT, ground: true }); break;
+        case 'aa': {
+          for (let i = 0; i < Math.min(st.multi, cands.length); i++) {
+            const tg = cands[i][1];
+            fire(tg, 'aa', 110, { dmg: dmg * (tg.flying ? def.airMul : 1) });
           }
           break;
         }
-        case 'tesla': {
-          const pts = [[t.x, ty + 0.6, t.z]];
-          const hitSet = new Set();
-          let cur = target, cd = dmg;
-          for (let i = 0; i < st.chain && cur; i++) {
-            hitSet.add(cur.id);
-            pts.push([r1(cur.x), cur.flying ? 4 : 1, r1(cur.z)]);
-            this.hit(cur, cd, null, false, true);
-            cd *= 0.85;
-            cur = this.nearestEnemy(cur.x, cur.z, 9, (o) => !o.wild && !hitSet.has(o.id));
-          }
-          this.events.push({ e: 'chain', p: pts });
-          break;
-        }
-        case 'rail': {
-          const dx = target.x - t.x, dz = target.z - t.z, d = Math.hypot(dx, dz) || 1;
-          const ex = t.x + dx / d * st.range, ez = t.z + dz / d * st.range;
-          for (const e of [...this.enemies.values()]) {
-            if (e.wild) continue;
-            if (segDist(e.x, e.z, t.x, t.z, ex, ez) < 1 + e.size * 0.5) this.hit(e, dmg, null, false, true);
-          }
-          this.events.push({ e: 'beam', k: 'rail', a: [t.x, ty, t.z], b: [r1(ex), 1.2, r1(ez)] });
-          break;
-        }
-        case 'mortar': {
-          const T = 1.3, g = 30;
-          const vx = (target.x - t.x) / T, vz = (target.z - t.z) / T;
-          const vy = (0 - ty) / T + 0.5 * g * T;
-          this.addProjectile({ k: 'mortar', x: t.x, y: ty, z: t.z, vx, vy, vz, ttl: T, dmg, owner: null, g, splash: st.splash });
-          break;
-        }
+        case 'atgm': fire(target, 'atgm', 38, { dmg: dmg * (ENEMIES[target.kind].vehicle ? def.heavyMul : 1), ap: true }); break;
+        case 'mortar': arc(target, 'mortar', 1.6, { dmg, splash: st.splash, ground: true }); break;
+        case 'howitzer': arc(target, 'shell', 2.4, { dmg, splash: st.splash, ground: true }); break;
       }
       this.events.push({ e: 'tf', id: t.id });
     }
@@ -961,7 +963,8 @@ export class Game {
         if (tg) {
           // м'яке наведення не змінюємо візуально — просто зараховуємо влучання
           const d = Math.hypot(tg.x - p.x, tg.z - p.z);
-          if (d < 1.2 + tg.size * 0.5 + 55 * dt) { this.hit(tg, p.dmg, null, false, true); this.endProjectile(p, tg.x, tg.z); continue; }
+          const spd = Math.hypot(p.vx, p.vz) || 50;
+          if (d < 1.2 + tg.size * 0.5 + spd * dt) { this.hit(tg, p.dmg, null, false, true, p.ap); this.endProjectile(p, tg.x, tg.z); continue; }
         }
       }
       p.x += p.vx * dt; p.y += p.vy * dt - 0.5 * p.g * dt * dt; p.z += p.vz * dt;
@@ -969,9 +972,12 @@ export class Game {
       p.ttl -= dt;
       if (p.hostile) {
         for (const h of players) {
-          if (!h.dead && segDist(h.x, h.z, ox, oz, p.x, p.z) < 1.1) { this.damageHero(h, p.dmg); p.ttl = -1; break; }
+          if (!h.dead && segDist(h.x, h.z, ox, oz, p.x, p.z) < (p.blast ? 1.6 : 0.9)) { this.damageHero(h, p.dmg); p.ttl = -1; break; }
         }
-        if (p.ttl <= 0) this.endProjectile(p, p.x, p.z);
+        if (p.ttl <= 0) {
+          if (p.blast) this.events.push({ e: 'boom', x: r1(p.x), z: r1(p.z), r: p.blast, k: 'rocket' });
+          this.endProjectile(p, p.x, p.z);
+        }
         continue;
       }
       if (p.k === 'hero') {
@@ -989,11 +995,14 @@ export class Game {
         if (ended) { this.endProjectile(p, p.x, p.z); continue; }
       }
       if (p.ttl <= 0) {
-        if (p.k === 'mortar') {
-          this.events.push({ e: 'boom', x: r1(p.x), z: r1(p.z), r: p.splash, k: 'mortar' });
+        if (p.splash) {
+          this.events.push({ e: 'boom', x: r1(p.x), z: r1(p.z), r: p.splash, k: p.k });
           for (const e of [...this.enemies.values()]) {
-            if (e.wild || e.flying) continue;
-            if (Math.hypot(e.x - p.x, e.z - p.z) < p.splash + e.size * 0.4) this.hit(e, p.dmg, null, false, true);
+            if (e.wild || (p.ground && e.flying && !ENEMIES[e.kind].low)) continue;
+            if (Math.hypot(e.x - p.x, e.z - p.z) < p.splash + e.size * 0.4) {
+              if (p.slow) { e.slowT = p.slowT; e.slowF = e.boss ? p.slow * 0.5 : p.slow; }
+              this.hit(e, p.dmg, null, false, true);
+            }
           }
         }
         this.endProjectile(p, p.x, p.z);
@@ -1013,7 +1022,7 @@ export class Game {
     const snap = {
       t: 'snap',
       time: r2(this.time),
-      wave: this.w.wave, phase: this.phase, timer: Math.max(0, Math.ceil(this.timer)),
+      wave: this.w.wave, phase: this.phase, sea: seasonOf(this.w.wave), wx: this.w.weather.kind, timer: Math.max(0, Math.ceil(this.timer)),
       left: this.phase === 'wave' ? this.spawnQueue.length + [...this.enemies.values()].filter((e) => !e.wild).length : 0,
       credits: Math.floor(this.w.credits), crystals: Math.floor(this.w.crystals),
       core: [Math.round(this.coreHp), Math.round(this.coreMax)],
@@ -1023,7 +1032,7 @@ export class Game {
         rd: p.ready ? 1 : 0, dr: p.stats.drone > 0 ? 1 : 0, cds: p.cds,
       })),
       enemies,
-      towers: [...this.towers.values()].map((t) => [t.id, r2(t.rot), t.type === 'laser' ? t.target : -1, t.aura ? 1 : 0, r2(t.ramp)]),
+      towers: [...this.towers.values()].map((t) => [t.id, r2(t.rot), t.target, t.aura ? 1 : 0]),
       loot: [...this.loot.values()].map((l) => [l.id, r1(l.x), r1(l.z), l.item.rarity]),
       ev: this.events,
     };

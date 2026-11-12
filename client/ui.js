@@ -2,7 +2,7 @@
 import {
   TOWERS, TOWER_TYPES, TOWER_MAX_LVL, towerStats, towerUpgradeCost, RESEARCH, researchCost, TALENTS, BRANCHES,
   RARITIES, SLOTS, AFFIXES, itemValue, itemSalvage, itemPower, xpToNext, ABILITIES, fmt, DIFFICULTY, heroStats,
-  EXTRACTOR_COST, extractorUpgradeCost, extractorRate, ENEMIES,
+  EXTRACTOR_COST, extractorUpgradeCost, extractorRate, ENEMIES, SEASONS, WEATHER,
 } from '/shared/data.js';
 import { QUALITY } from './scene.js';
 
@@ -43,10 +43,10 @@ export class UI {
       const d = TOWERS[type];
       const b = document.createElement('button');
       b.className = 'tb';
-      b.innerHTML = `<span class="k">${d.key}</span><div class="sw" style="background:${hex(d.color)};color:${hex(d.color)}"></div><div>${d.name}</div><div class="cost">◈ ${d.cost}</div>`;
+      b.innerHTML = `<span class="k">${d.key}</span><div class="sw" style="background:${hex(d.color)};color:${hex(d.color)}"></div><div>${d.name}</div><div class="cost">₴ ${d.cost}</div>`;
       b.addEventListener('click', () => this.G.selectBuild(type));
       b.addEventListener('mouseenter', () => this.showTip(`<div class="tn" style="color:${hex(d.color)}">${d.name}</div><div class="ts">${d.desc}</div>
-        <div class="th">Шкода ${d.dmg}${d.rate ? ` · ${d.rate}/с` : '/с (наростає)'} · Дальність ${d.range}</div>${d.unlock && !this.G.world.research[d.unlock] ? `<div class="th" style="color:#f66">Потрібне дослідження: ${RESEARCH[d.unlock].name}</div>` : ''}`, hex(d.color)));
+        <div class="th">Шкода ${d.dmg} · ${d.rate}/с · Дальність ${d.range} м</div>${d.unlock && !this.G.world.research[d.unlock] ? `<div class="th" style="color:#f66">Потрібне дослідження: ${RESEARCH[d.unlock].name}</div>` : ''}`, hex(d.color)));
       b.addEventListener('mouseleave', () => this.hideTip());
       bar.appendChild(b);
       this.buildBtns[type] = b;
@@ -58,7 +58,7 @@ export class UI {
     for (const type of TOWER_TYPES) {
       const d = TOWERS[type], b = this.buildBtns[type];
       const cost = Math.round(d.cost * (1 - thrift));
-      b.querySelector('.cost').textContent = '◈ ' + cost;
+      b.querySelector('.cost').textContent = '₴ ' + cost;
       b.classList.toggle('locked', !!(d.unlock && !G.world.research[d.unlock]));
       b.classList.toggle('poor', G.snap && G.snap.credits < cost);
       b.classList.toggle('sel', G.buildType === type);
@@ -66,11 +66,11 @@ export class UI {
   }
 
   initAbilities() {
-    const ic = { q: '➤', e: '✹', r: '☄' };
+    const ic = { q: '»', e: '✱', r: '⌖' };
     $('abilities').innerHTML = ['q', 'e', 'r'].map((k) => `<div class="ab" id="ab-${k}"><span class="k">${k.toUpperCase()}</span><div class="ic">${ic[k]}</div><div>${ABILITIES[k].name}</div><div class="cd"></div><div class="cdt"></div></div>`).join('');
     for (const k of ['q', 'e', 'r']) {
       const el = $('ab-' + k);
-      el.addEventListener('mouseenter', () => this.showTip(`<div class="tn">${ABILITIES[k].name} [${k.toUpperCase()}]</div><div class="ts">${ABILITIES[k].desc}</div><div class="th">${this.abilityInfo(k)}</div>`, '#3ae0ff'));
+      el.addEventListener('mouseenter', () => this.showTip(`<div class="tn">${ABILITIES[k].name} [${k.toUpperCase()}]</div><div class="ts">${ABILITIES[k].desc}</div><div class="th">${this.abilityInfo(k)}</div>`, '#d9c27a'));
       el.addEventListener('mouseleave', () => this.hideTip());
     }
   }
@@ -106,8 +106,10 @@ export class UI {
     $('ready-btn').innerHTML = (meP && meP.rd ? '✓ Готовий — чекаємо інших' : 'Готові до бою') + ' <kbd>G</kbd>';
     const cf = s.core[0] / s.core[1];
     $('core-fill').style.width = Math.max(0, cf * 100) + '%';
-    $('core-fill').style.background = cf > 0.5 ? 'linear-gradient(90deg,#1aa6ff,#3ae0ff)' : cf > 0.25 ? 'linear-gradient(90deg,#d08a00,#ffd23a)' : 'linear-gradient(90deg,#a00,#ff4a5a)';
-    $('core-text').textContent = `ЯДРО ${fmt(s.core[0])} / ${fmt(s.core[1])}`;
+    $('core-fill').style.background = cf > 0.5 ? 'linear-gradient(90deg,#1aa6ff,#d9c27a)' : cf > 0.25 ? 'linear-gradient(90deg,#d08a00,#ffd23a)' : 'linear-gradient(90deg,#a00,#ff4a5a)';
+    $('core-text').textContent = `ШТАБ ${fmt(s.core[0])} / ${fmt(s.core[1])}`;
+    const W = WEATHER[s.wx] || WEATHER.clear;
+    $('wx').innerHTML = `${SEASONS[s.sea]?.name || ''} · ${W.name}${W.desc ? ` <span>(${W.desc})</span>` : ''}`;
     // команда
     $('team').innerHTML = s.players.map((p) => `<div class="tm ${p.d ? 'dead' : ''}" style="border-left-color:${hex(p.c)}">
       <div class="n"><span>${esc(p.n)}${p.n === G.name ? ' (ви)' : ''}</span><span>рів. ${p.l}${p.rd && s.phase === 'prep' ? ' <span class="rd">✓</span>' : ''}</span></div>
@@ -145,7 +147,7 @@ export class UI {
     setTimeout(() => (d.style.opacity = '0'), 9000);
     setTimeout(() => d.remove(), 10000);
   }
-  banner(text, sub = '', color = '#3ae0ff', dur = 3) {
+  banner(text, sub = '', color = '#d9c27a', dur = 3) {
     const b = $('banner');
     b.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
     b.style.color = color;
@@ -159,7 +161,7 @@ export class UI {
     p.innerHTML = html;
     p.classList.remove('hidden');
   }
-  showTip(html, color = '#3ae0ff') {
+  showTip(html, color = '#d9c27a') {
     this.tip.innerHTML = html;
     this.tip.style.borderColor = color;
     this.tip.classList.remove('hidden');
@@ -188,16 +190,17 @@ export class UI {
     this._tpKey = key;
     $('tower-panel').innerHTML = `<h3 style="color:${hex(d.color)}">${d.name}</h3><div style="color:var(--dim);margin-bottom:8px">Рівень ${t.level} / ${TOWER_MAX_LVL}</div>
       ${row('Шкода', st.dmg, nx?.dmg)}
-      ${d.rate ? row('Пострілів/с', st.rate, nx?.rate, (v) => v.toFixed(2)) : row('Наростання', d.ramp, null, (v) => `до ×${(1 + v).toFixed(1)}`)}
+      ${row('Пострілів/с', st.rate, nx?.rate, (v) => v.toFixed(2))}
       ${row('Дальність', st.range, nx?.range, (v) => v.toFixed(1) + ' м')}
       ${d.splash ? row('Радіус ураження', st.splash, nx?.splash, (v) => v.toFixed(1) + ' м') : ''}
       ${d.slow ? row('Сповільнення', st.slow, nx?.slow, (v) => Math.round(v * 100) + '%') : ''}
-      ${d.chain ? row('Перескоків', st.chain, nx?.chain, (v) => v) : ''}
-      <div class="st"><span>Вкладено</span><span><b>◈ ${fmt(t.spent)}</b></span></div>
+      ${d.multi ? row('Цілей одночасно', st.multi, nx?.multi, (v) => v) : ''}
+      ${d.ap ? '<div class="st"><span>Бронебійність</span><b>ігнорує броню</b></div>' : ''}
+      <div class="st"><span>Вкладено</span><span><b>₴ ${fmt(t.spent)}</b></span></div>
       <div class="row2">
-        <button id="tp-up" ${max || G.snap?.credits < cost ? 'disabled' : ''}>${max ? 'Максимум' : `Покращити ◈ ${fmt(cost)}`} <kbd>U</kbd></button>
+        <button id="tp-up" ${max || G.snap?.credits < cost ? 'disabled' : ''}>${max ? 'Максимум' : `Покращити ₴ ${fmt(cost)}`} <kbd>U</kbd></button>
       </div>
-      <div class="row2"><button id="tp-sell">Продати ◈ ${fmt(Math.round(t.spent * 0.7))}</button><button id="tp-close">Закрити</button></div>`;
+      <div class="row2"><button id="tp-sell">Продати ₴ ${fmt(Math.round(t.spent * 0.7))}</button><button id="tp-close">Закрити</button></div>`;
     $('tp-up').onclick = () => { G.send({ t: 'upgrade', id: t.id }); };
     $('tp-sell').onclick = () => { G.send({ t: 'sell', id: t.id }); this.selectTower(null); G.audio.play('sell'); };
     $('tp-close').onclick = () => this.selectTower(null);
@@ -244,7 +247,7 @@ export class UI {
     let cmp = '';
     if (compare) {
       const d = itemPower(it) - itemPower(compare);
-      cmp = `<div class="th">Порівняно з одягненим: <span style="color:${d >= 0 ? '#4dff7a' : '#ff4a5a'}">${d >= 0 ? '+' : ''}${d} сили</span></div>`;
+      cmp = `<div class="th">Порівняно з одягненим: <span style="color:${d >= 0 ? '#9ccf6a' : '#ff4a5a'}">${d >= 0 ? '+' : ''}${d} сили</span></div>`;
     }
     return `<div class="tn" style="color:${r.color}">${esc(it.name)}</div><div class="tr" style="color:${r.color}">${r.name} · ${SLOTS[it.slot]} · рів. предмета ${it.ilvl}</div>
       <div class="ts">${lines.join('<br>')}</div><div class="th">Сила: ${itemPower(it)}</div>${cmp}`;
@@ -279,14 +282,14 @@ export class UI {
           ${stat('Броня', s.armor.toFixed(0))}${stat('Регенерація', s.regen.toFixed(1) + '/с')}
           ${stat('Вампіризм', (s.leech * 100).toFixed(1) + '%')}${stat('Зниження шкоди', (s.dr * 100).toFixed(0) + '%')}
           ${stat('Швидкість', s.speed.toFixed(1))}${stat('Перезарядка', '−' + (s.cdr * 100).toFixed(0) + '%')}
-          ${stat('Пробиття', (s.pierce * 100).toFixed(0) + '%')}${stat('Аура веж', '+' + (s.towerAura * 100).toFixed(0) + '%')}
-          ${stat('Бонус досвіду', '+' + ((s.xpMul - 1) * 100).toFixed(0) + '%')}${stat('Знижка на вежі', (s.thrift * 100).toFixed(0) + '%')}
+          ${stat('Пробиття', (s.pierce * 100).toFixed(0) + '%')}${stat('Коригування позицій', '+' + (s.towerAura * 100).toFixed(0) + '%')}
+          ${stat('Бонус досвіду', '+' + ((s.xpMul - 1) * 100).toFixed(0) + '%')}${stat('Знижка на позиції', (s.thrift * 100).toFixed(0) + '%')}
         </div>
       </div>
       <div class="col">
         <h2>Спорядження</h2>
         <div class="equip">${eq('weapon')}${eq('armor')}${eq('module')}</div>
-        <h2>Інвентар <span style="font-size:13px;color:var(--dim)">${p.inv.length}/40 · ЛКМ — одягти · ПКМ — продати · Shift+ПКМ — розібрати на кристали</span></h2>
+        <h2>Інвентар <span style="font-size:13px;color:var(--dim)">${p.inv.length}/40 · ЛКМ — одягти · ПКМ — продати · Shift+ПКМ — розібрати на запчастини</span></h2>
         <div class="inv" id="inv">${cells.join('')}</div>
         <div class="bulk">Масово:
           <button data-bulk="0" data-m="sell">Продати звичайні</button><button data-bulk="1" data-m="sell">Продати ≤ незвичайні</button>
@@ -295,7 +298,7 @@ export class UI {
       </div></div>`;
     body.querySelectorAll('.it[data-i]').forEach((el) => {
       const it = p.inv[+el.dataset.i];
-      el.addEventListener('mouseenter', () => this.showTip(this.itemTip(it, p.equip[it.slot]) + `<div class="th">Продаж ◈ ${itemValue(it)} · Розбір ◆ ${itemSalvage(it)}</div>`, RARITIES[it.rarity].color));
+      el.addEventListener('mouseenter', () => this.showTip(this.itemTip(it, p.equip[it.slot]) + `<div class="th">Продаж ₴ ${itemValue(it)} · Розбір ⚙ ${itemSalvage(it)}</div>`, RARITIES[it.rarity].color));
       el.addEventListener('mouseleave', () => this.hideTip());
       el.addEventListener('click', () => { G.send({ t: 'equip', id: it.id }); this.hideTip(); G.audio.play('ui'); });
       el.addEventListener('contextmenu', (e) => { e.preventDefault(); G.send({ t: e.shiftKey ? 'salvage' : 'sellItem', id: it.id }); this.hideTip(); G.audio.play(e.shiftKey ? 'ui' : 'sell'); });
@@ -314,7 +317,7 @@ export class UI {
     const spent = Object.values(p.talents).reduce((s, v) => s + v, 0);
     body.innerHTML = `<h2>Таланти · вільних очок: <span style="color:var(--green)">${p.points}</span></h2>
       <div style="color:var(--dim);font-size:13px;margin-bottom:14px">Кожен рівень героя дає 1 очко. Поєднуйте гілки як завгодно — роль у команді визначаєте ви.
-      <button id="respec" style="margin-left:12px" ${spent ? '' : 'disabled'}>Скинути таланти (◆ ${20 + spent * 5})</button></div>
+      <button id="respec" style="margin-left:12px" ${spent ? '' : 'disabled'}>Скинути таланти (⚙ ${20 + spent * 5})</button></div>
       <div class="branches">${Object.entries(BRANCHES).map(([bid, b]) => `<div class="branch" style="border-color:${b.color}55">
         <h3 style="color:${b.color}">${b.name}</h3><div class="bd">${b.desc}</div>
         ${Object.entries(TALENTS).filter(([, t]) => t.branch === bid).map(([id, t]) => {
@@ -330,8 +333,8 @@ export class UI {
     const G = this.G, R = G.world.research, cr = G.snap?.crystals || 0;
     const groups = {};
     for (const [id, r] of Object.entries(RESEARCH)) (groups[r.branch] ||= []).push([id, r]);
-    body.innerHTML = `<h2>Дослідження · ◆ <span style="color:var(--cry)">${fmt(cr)}</span> кристалів</h2>
-      <div style="color:var(--dim);font-size:13px;margin-bottom:14px">Спільні для всієї команди. Кристали дають шахти на родовищах (клавіша F біля родовища), табори монстрів, боси та розбір предметів.</div>
+    body.innerHTML = `<h2>Модернізація · ⚙ <span style="color:var(--cry)">${fmt(cr)}</span> запчастин</h2>
+      <div style="color:var(--dim);font-size:13px;margin-bottom:14px">Спільна для всієї команди. Запчастини дають майстерні на покинутих складах (F поруч), зачищені позиції ДРГ, знищені важкі цілі та розбір трофеїв.</div>
       ${Object.entries(groups).map(([g, list]) => `<div class="rs-branch"><h2 style="font-size:16px;color:var(--cry)">${g}</h2><div class="rs-grid">
         ${list.map(([id, r]) => {
           const lv = R[id] || 0;
@@ -339,7 +342,7 @@ export class UI {
           const lock = r.req && !R[r.req];
           const cost = researchCost(id, lv);
           return `<div class="rs ${done ? 'done' : ''} ${lock ? 'lock' : ''}"><div class="tx">${r.name} ${r.max > 1 ? `<span style="color:var(--dim)">${lv}/${r.max}</span>` : ''}<small>${r.desc}${lock ? ` · потрібно: ${RESEARCH[r.req].name}` : ''}</small></div>
-          <button data-r="${id}" ${done || lock || cr < cost ? 'disabled' : ''}>${done ? '✓' : '◆ ' + fmt(cost)}</button></div>`;
+          <button data-r="${id}" ${done || lock || cr < cost ? 'disabled' : ''}>${done ? '✓' : '⚙ ' + fmt(cost)}</button></div>`;
         }).join('')}</div></div>`).join('')}`;
     body.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => { G.send({ t: 'research', id: b.dataset.r }); G.audio.play('upgrade'); }));
   }
@@ -354,16 +357,16 @@ export class UI {
       <div><span>Складність</span><b>${DIFFICULTY[G.world.cfg.difficulty].name}</b></div>
       <div><span>Поточна хвиля</span><b>${s.wave}</b></div>
       <div><span>Найкраща відбита хвиля</span><b>${st.bestWave || 0}</b></div>
-      <div><span>Наступний бос</span><b>хвиля ${nextBoss}</b></div>
+      <div><span>Наступна важка ціль</span><b>хвиля ${nextBoss}</b></div>
       <div><span>Ворогів знищено</span><b>${fmt(st.kills || 0)}</b></div>
       <div><span>Босів знищено</span><b>${st.bosses || 0}</b></div>
-      <div><span>Падінь ядра</span><b>${st.defeats || 0}</b></div>
+      <div><span>Знищень штабу</span><b>${st.defeats || 0}</b></div>
       <div><span>Час у грі</span><b>${h} год ${m} хв</b></div>
-      <div><span>Веж збудовано</span><b>${G.world.towers.length}</b></div>
-      <div><span>Шахт</span><b>${mines.length} / ${G.world.extractors.length} · ◆ ${rate.toFixed(2)}/с</b></div>
+      <div><span>Вогневих позицій</span><b>${G.world.towers.length}</b></div>
+      <div><span>Майстерень</span><b>${mines.length} / ${G.world.extractors.length} · ⚙ ${rate.toFixed(2)}/с</b></div>
       </div></div>
-      <div class="col"><h2>Бестіарій</h2><div class="stats-grid" style="grid-template-columns:1fr">
-      ${Object.entries(ENEMIES).filter(([, e]) => !e.wild).map(([, e]) => `<div><span style="color:${hex(e.color)}">${e.name}${e.boss ? ' (бос)' : ''}${e.flying ? ' · літає' : ''}</span><b>${e.armor ? 'броня ' + e.armor : ''}${e.shield ? ' щит' : ''}${e.heal ? ' лікує' : ''}</b></div>`).join('')}
+      <div class="col"><h2>Розвідка: противник</h2><div class="stats-grid" style="grid-template-columns:1fr">
+      ${Object.entries(ENEMIES).filter(([, e]) => !e.wild).map(([, e]) => `<div><span>${e.name}${e.boss ? ' (важка ціль)' : ''}${e.flying ? ' · повітряна' : ''}${e.vehicle ? ' · техніка' : ''}</span><b>${e.armor ? 'броня ' + e.armor : ''}${e.shield ? ' щит' : ''}${e.heal ? ' лікує' : ''}</b></div>`).join('')}
       </div><div style="color:var(--dim);font-size:12px;margin-top:10px">Сила хвиль зростає з кожним номером незалежно від вашого рівня. Що швидше прокачуєтесь, то легше їх відбивати.</div></div></div>`;
   }
 
@@ -399,8 +402,8 @@ export class UI {
     const cost = lvl === 0 ? EXTRACTOR_COST : extractorUpgradeCost(lvl);
     const cur = extractorRate(lvl, G.world.research), nx = extractorRate(lvl + 1, G.world.research);
     return lvl === 0
-      ? `<b>[F]</b> Збудувати шахту кристалів — ◈ ${fmt(cost)} <span style="color:var(--cry)">(◆ ${nx.toFixed(2)}/с)</span>`
-      : `Шахта рів. ${lvl} · ◆ ${cur.toFixed(2)}/с — <b>[F]</b> покращити за ◈ ${fmt(cost)} <span style="color:var(--cry)">(→ ${nx.toFixed(2)}/с)</span>`;
+      ? `<b>[F]</b> Облаштувати майстерню — ₴ ${fmt(cost)} <span style="color:var(--cry)">(⚙ ${nx.toFixed(2)}/с)</span>`
+      : `Майстерня рів. ${lvl} · ⚙ ${cur.toFixed(2)}/с — <b>[F]</b> покращити за ₴ ${fmt(cost)} <span style="color:var(--cry)">(→ ${nx.toFixed(2)}/с)</span>`;
   }
 }
 export { heroStats };

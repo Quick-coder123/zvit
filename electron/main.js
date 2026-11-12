@@ -17,7 +17,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 const argHost = process.argv.find((a) => a.startsWith('--host='));
 const remoteHost = argHost ? argHost.slice(7) : null;
 const port = +(process.argv.find((a) => a.startsWith('--port=')) || '').slice(7) || PORT;
-const saveDir = path.join(process.env.PROGRAMDATA || app.getPath('userData'), 'NeonBastion');
+const saveDir = path.join(process.env.PROGRAMDATA || app.getPath('userData'), 'LastLine');
 
 let srv = null;
 let win = null;
@@ -46,7 +46,7 @@ async function createWindow() {
   win = new BrowserWindow({
     width: 1600, height: 900, minWidth: 1100, minHeight: 650,
     backgroundColor: '#05070d',
-    title: 'Неоновий Бастіон',
+    title: 'Останній рубіж',
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), backgroundThrottling: false },
   });
