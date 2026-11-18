@@ -37,31 +37,13 @@ Reply "ok" and wait for my requests.
 
 ## 1. Ландшафт
 
-### `ground.png`: земля
-```
-Seamless tileable ground texture for the game map, top-down. Very calm warm off-white
-#F4F1EA base with barely visible soft speckles and a faint lighter/darker patchiness,
-almost flat. Must tile perfectly on all four edges with no visible seams.
-NOT transparent: fill the whole square. No grass blades, no objects, no grid lines.
-```
-
-### `ore_iron.png`: поклад заліза
-```
-Seamless tileable top-down texture of an iron ore deposit on the ground: scattered rounded
-blue-grey stones #7D8E9C of different sizes, some with darker outlines #4C566A, on the
-off-white ground #F4F1EA, about 45% of the area covered by stones. Calm flat vector style.
-Must tile perfectly on all four edges. NOT transparent: fill the whole square.
-```
-
-### `ore_copper.png`: поклад міді
-```
-Same as the iron deposit texture, but stones are warm copper #C97B4A with a few greenish
-patina spots #7FA88C. Seamless tileable, top-down, fills the whole square, off-white ground #F4F1EA.
-```
+Вже готово: `ground`, `ore_iron`, `ore_copper` (лежать у `assets/`).
 
 ### `ore_coal.png`: поклад вугілля
 ```
-Same deposit texture style, but stones are matte charcoal black #3B3F45 with tiny dark-grey
+Seamless tileable top-down texture of an ore deposit on the off-white ground #F4F1EA:
+scattered rounded stones of different sizes with darker outlines, about 45% of the area
+covered, calm flat vector style. This time the stones are matte charcoal black #3B3F45 with tiny dark-grey
 facets. Seamless tileable, top-down, fills the whole square, off-white ground #F4F1EA.
 ```
 
@@ -342,7 +324,7 @@ vector, centred, transparent background.
 
 ## Перелік файлів
 
-**Ландшафт:** `ground`, `ore_iron`, `ore_copper`, `ore_coal`, `ore_stone`, `ore_sand`
+**Ландшафт:** `ore_coal`, `ore_stone`, `ore_sand`
 
 **Логістика:** `belt`, `belt_curve`, `tunnel_in`, `tunnel_out`, `splitter`, `merger`, `sorter`
 
@@ -358,4 +340,4 @@ vector, centred, transparent background.
 
 **Інтерфейс:** `icon`, `menu`, `wave` (необов'язково), `research`
 
-Разом 47 картинок. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
+Лишилось 44 картинки. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
