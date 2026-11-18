@@ -72,6 +72,8 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 		}
 	}
 
+	g.drawRuins(dst)
+
 	view := func(b *sim.Building) bool {
 		sz := b.Size()
 		return b.Pos.X+sz >= tx0 && b.Pos.X <= tx1 && b.Pos.Y+sz >= ty0 && b.Pos.Y <= ty1
@@ -100,6 +102,14 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 			g.drawBuilding(dst, b, 1)
 		}
 	}
+	g.drawEnemies(dst)
+	g.drawShots(dst)
+	for _, id := range order {
+		if b := g.w.Buildings[id]; b.Dmg > 0 && view(b) {
+			g.drawHPBar(dst, b)
+		}
+	}
+	g.drawThreats(dst)
 }
 
 // beltItemPos returns tile-space coordinates for an item at progress p.
@@ -199,6 +209,19 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	case sim.KSplitter, sim.KMerger, sim.KSorter:
 		g.drawRouter(dst, b, x, y, s, fade)
 		return
+	case sim.KWall:
+		stone := rgb(0xB9AE9E)
+		fillRoundRect(dst, x+s*0.03, y+s*0.07, s*0.94, s*0.94, s*0.12, fade(rgba(0x2E3440, 0x26)))
+		fillRoundRect(dst, x+s*0.03, y+s*0.03, s*0.94, s*0.94, s*0.12, fade(stone))
+		lc := fade(mix(stone, colInk, 0.3))
+		lw := max32(1, s*0.04)
+		line(dst, x+s*0.06, y+s*0.36, x+s*0.94, y+s*0.36, lw, lc)
+		line(dst, x+s*0.06, y+s*0.66, x+s*0.94, y+s*0.66, lw, lc)
+		line(dst, x+s*0.5, y+s*0.06, x+s*0.5, y+s*0.36, lw, lc)
+		line(dst, x+s*0.28, y+s*0.36, x+s*0.28, y+s*0.66, lw, lc)
+		line(dst, x+s*0.72, y+s*0.36, x+s*0.72, y+s*0.66, lw, lc)
+		line(dst, x+s*0.5, y+s*0.66, x+s*0.5, y+s*0.94, lw, lc)
+		return
 	}
 
 	// shadow + body
@@ -268,13 +291,17 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 		}
 	}
 
+	if b.Kind == sim.KTurret || b.Kind == sim.KFlamer || b.Kind == sim.KCore {
+		g.drawWeapon(dst, b, cx, cy, w, fade)
+	}
+
 	// output product badge for crafters
 	if (b.Kind == sim.KFurnace || b.Kind == sim.KAssembler) && b.Recipe >= 0 && s >= 12 {
 		drawItem(dst, sim.Recipes[b.Recipe].Out.Item, bx+bw*0.16, by+bw*0.16, s*0.34)
 	}
 
 	// output arrow on the front face
-	if b.Kind != sim.KCore {
+	if b.Kind != sim.KCore && b.Kind != sim.KTurret && b.Kind != sim.KFlamer {
 		a := dirAngle(b.Dir)
 		ax := cx + float32(b.Dir.DX())*(bw/2-s*0.02)
 		ay := cy + float32(b.Dir.DY())*(bw/2-s*0.02)

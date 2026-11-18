@@ -107,3 +107,34 @@ func BuildLogisticsDemo(w *World) {
 	place(KBelt, 16, 0, East)
 	place(KChest, 17, 0, East)
 }
+
+// BuildCombatDemo adds defences east of the iron miners and an incoming wave.
+func BuildCombatDemo(w *World) {
+	for y := -9; y <= -1; y++ {
+		w.Place(KWall, Pos{17, y}, East, 0)
+	}
+	t1, _ := w.Place(KTurret, Pos{15, -8}, East, 0)
+	t2, _ := w.Place(KTurret, Pos{15, -3}, East, 0)
+	f, _ := w.Place(KFlamer, Pos{16, -5}, East, 0)
+	for _, b := range []*Building{t1, t2} {
+		if b != nil {
+			b.Ammo = 120
+		}
+	}
+	if f != nil {
+		f.Ammo = 160
+	}
+	w.Peaceful = false
+	w.Wave = 5
+	for i := 0; i < 14; i++ {
+		k := Crawler
+		if i%4 == 0 {
+			k = Swarmer
+		}
+		if i == 3 || i == 9 {
+			k = Brute
+		}
+		w.Enemies = append(w.Enemies, &Enemy{Kind: k, X: 26 + float64(i%5)*1.3, Y: -9 + float64(i)*0.8, HP: EnemyDefs[k].HP, Phase: float32(i)})
+	}
+	w.Ruins = append(w.Ruins, Spec{Kind: KWall, Pos: Pos{17, 0}, Dir: East})
+}

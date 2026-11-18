@@ -14,9 +14,6 @@ import (
 
 const autosaveEvery = 30 * time.Second
 
-// Toolbar order; index+1 is the hotkey.
-var toolbar = []sim.Kind{sim.KBelt, sim.KTunnel, sim.KSplitter, sim.KMerger, sim.KSorter, sim.KMiner, sim.KFurnace, sim.KAssembler, sim.KChest}
-
 type Game struct {
 	w        *sim.World
 	savePath string
@@ -61,6 +58,7 @@ type Game struct {
 	clipH     int
 	pasting   bool
 	iconMode  bool // drawing toolbar icons, not the world
+	research  bool // research panel open
 }
 
 // New creates the game around a world; savePath is used for autosave.
@@ -110,6 +108,13 @@ func (g *Game) Update() error {
 	if !g.menu {
 		g.w.Update(nil)
 	}
+	if n := len(g.w.Notices); n > 0 {
+		g.say("%s", g.w.Notices[n-1])
+		g.w.Notices = g.w.Notices[:0]
+	}
+	if !g.w.Peaceful && len(g.w.Enemies) == 0 && g.w.NextWave < 30 && g.w.NextWave+sim.DT >= 30 {
+		g.say("Хвиля %d за 30 секунд — готуй оборону!", g.w.Wave+1)
+	}
 	if time.Since(g.lastSave) > autosaveEvery {
 		g.Save()
 	}
@@ -148,6 +153,8 @@ func (g *Game) handleInput() {
 		switch {
 		case g.help:
 			g.help = false
+		case g.research:
+			g.research = false
 		case g.selecting:
 			g.selecting = false
 		case g.pasting:
@@ -223,10 +230,18 @@ func (g *Game) handleInput() {
 	}
 
 	// hotkeys
-	for i, k := range toolbar {
-		if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
-			g.selectTool(k)
+	if !ctrl {
+		for i, k := range toolList() {
+			if inpututil.IsKeyJustPressed(toolKeys[i]) {
+				g.selectTool(k)
+			}
 		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyT) {
+		g.research = !g.research
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyB) && len(g.w.Ruins) > 0 {
+		g.rebuild()
 	}
 	if inpututil.IsKeyJustPressed(ebiten.Key0) {
 		g.tool = sim.KNone
@@ -357,6 +372,11 @@ func (g *Game) handleInput() {
 func (g *Game) selectTool(k sim.Kind) {
 	if g.tool == k {
 		g.tool = sim.KNone
+		return
+	}
+	if !g.w.Unlocked(k) {
+		g.say("%s ще не відкрито — дивись дослідження (T)", sim.Builds[k].Name)
+		g.research = true
 		return
 	}
 	g.tool = k

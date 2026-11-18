@@ -53,8 +53,18 @@ func main() {
 	g := game.New(w, *savePath)
 	if *shot != "" {
 		w.Seed = 7
-		sim.BuildDemo(w)
-		sim.BuildLogisticsDemo(w)
+		if *shotScene != "start" {
+			w.UnlockAll()
+			sim.BuildDemo(w)
+			sim.BuildLogisticsDemo(w)
+			w.Peaceful = true
+		}
+		switch *shotScene {
+		case "combat":
+			sim.BuildCombatDemo(w)
+		case "research":
+			w.Researched = map[string]bool{"furnace": true, "walls": true, "assembler": true, "chest": true}
+		}
 		g.SetScreenshot(*shot, *shotFrames, func(g *game.Game) { debugScene(g, w, *shotScene) })
 	}
 	ebiten.SetWindowTitle("Потік")
@@ -97,6 +107,13 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 		g.DebugCamera(float64(o.X)+9, float64(o.Y)+0.5, 46)
 		g.DebugTool(sim.KTunnel, sim.East)
 		g.DebugMouse(640+46*7.5, 400+46*3)
+	case "combat":
+		g.DebugCamera(17, -5, 40)
+	case "start", "research":
+		g.DebugCamera(0, 0, 40)
+		if scene == "research" {
+			g.DebugResearch(true)
+		}
 	case "far":
 		g.DebugCamera(0, 0, 9)
 	}

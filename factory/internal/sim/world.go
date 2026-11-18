@@ -42,6 +42,14 @@ type Building struct {
 	Filter Item      // sorter
 	Exit   bool      // tunnel: this end is the exit
 	Buf    []BufItem // routers (splitter, merger, sorter)
+
+	// Combat
+	Dmg       float32 // damage taken (0 = full health)
+	LastHit   uint64  // tick of the last damage
+	Ammo      int32   // turret shots or flamer fuel
+	Aim       float32 // turret barrel angle
+	Cool      float32 // weapon cooldown
+	FreeBuilt bool    // built with a starter token; refunds the token
 }
 
 // BufItem is an item waiting inside a router, remembering where it came from.
@@ -95,6 +103,19 @@ type World struct {
 	Buildings map[int32]*Building
 	Stock     [ItemCount]int
 
+	Free       [KindCount]int  // starter buildings that cost nothing
+	Researched map[string]bool // finished research
+	Enemies    []*Enemy
+	Wave       int     // waves spawned so far
+	NextWave   float64 // seconds until the next wave
+	WaveAngle  float64 // direction the next wave comes from (radians)
+	Peaceful   bool    // no waves
+	Ruins      []Spec  // destroyed buildings that can be rebuilt
+	Kills      int
+
+	Shots   []Shot   // transient weapon effects (not saved)
+	Notices []string // messages for the UI (not saved)
+
 	grid   map[Pos]int32
 	chunks map[Pos]*[chunkSize * chunkSize]Item
 	order  []int32
@@ -104,14 +125,13 @@ type World struct {
 
 // NewWorld creates a fresh world with a core at the origin and a starter stock.
 func NewWorld(seed int64) *World {
-	w := &World{Seed: seed, Buildings: map[int32]*Building{}}
+	w := &World{Seed: seed, Buildings: map[int32]*Building{}, Researched: map[string]bool{}}
 	w.initCaches()
 	w.add(&Building{Kind: KCore, Pos: Pos{-1, -1}, Recipe: -1})
-	w.Stock[IronPlate] = 140
-	w.Stock[Gear] = 30
-	w.Stock[Stone] = 60
-	w.Stock[Wire] = 24
-	w.Stock[CopperPlate] = 20
+	w.Free[KMiner] = 1
+	w.Free[KBelt] = 10
+	w.NextWave = FirstWaveDelay
+	w.WaveAngle = w.rollWaveAngle()
 	return w
 }
 
@@ -173,16 +193,12 @@ var (
 	ErrNoOre    = errors.New("бур треба ставити на поклад")
 	ErrNoFunds  = errors.New("бракує ресурсів у ядрі")
 	ErrCore     = errors.New("ядро не можна знести")
+	ErrLocked   = errors.New("спершу відкрий це в дослідженнях (T)")
 )
 
-// CanAfford checks the core stock for a building cost.
+// CanAfford checks starter tokens and the core stock for a building cost.
 func (w *World) CanAfford(k Kind) bool {
-	for _, c := range Builds[k].Cost {
-		if w.Stock[c.Item] < c.N {
-			return false
-		}
-	}
-	return true
+	return w.Free[k] > 0 || w.affordable(Builds[k].Cost)
 }
 
 // CheckPlace validates a placement without changing anything.
@@ -203,6 +219,9 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 				}
 			}
 		}
+	}
+	if !w.Unlocked(k) {
+		return ErrLocked
 	}
 	if k == KMiner {
 		if it, _ := w.minerOre(p); it == ItemNone {
@@ -262,10 +281,15 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 	if err := w.CheckPlace(k, p, d); err != nil {
 		return nil, err
 	}
-	for _, c := range Builds[k].Cost {
-		w.Stock[c.Item] -= c.N
-	}
 	b := &Building{Kind: k, Pos: p, Dir: d, Owner: owner, Recipe: -1}
+	if w.Free[k] > 0 {
+		w.Free[k]--
+		b.FreeBuilt = true
+	} else {
+		for _, c := range Builds[k].Cost {
+			w.Stock[c.Item] -= c.N
+		}
+	}
 	switch k {
 	case KMiner:
 		b.MinerItem, b.MinerTiles = w.minerOre(p)
@@ -281,7 +305,7 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 		b.Filter = sp.Filter
 	}
 	w.add(b)
-	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k {
+	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k && w.RecipeUnlocked(sp.Recipe) {
 		w.SetRecipe(b.ID, sp.Recipe)
 	}
 	w.refreshAround(p)
@@ -347,9 +371,15 @@ func (w *World) Remove(id int32) error {
 	if b.Kind == KCore {
 		return ErrCore
 	}
-	for _, c := range Builds[b.Kind].Cost {
-		w.Stock[c.Item] += c.N
+	if b.FreeBuilt {
+		w.Free[b.Kind]++
+	} else {
+		for _, c := range Builds[b.Kind].Cost {
+			w.Stock[c.Item] += c.N
+		}
 	}
+	w.Stock[Ammo] += int(b.Ammo) / AmmoShots * boolInt(b.Kind == KTurret)
+	w.Stock[Coal] += int(b.Ammo) / CoalFuel * boolInt(b.Kind == KFlamer)
 	for _, it := range b.Belt {
 		w.Stock[it.Item]++
 	}
@@ -382,7 +412,7 @@ func (w *World) Rotate(id int32) {
 // SetRecipe selects a recipe for a machine, returning buffered inputs to the core.
 func (w *World) SetRecipe(id int32, r int) {
 	b := w.Buildings[id]
-	if b == nil || b.Recipe == r {
+	if b == nil || b.Recipe == r || (r >= 0 && !w.RecipeUnlocked(r)) {
 		return
 	}
 	for _, s := range b.InBuf {
@@ -520,4 +550,11 @@ func (w *World) ReverseLine(b *Building) int {
 		w.refreshAround(c.Pos)
 	}
 	return len(line)
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

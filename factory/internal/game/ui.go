@@ -81,6 +81,7 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 
 	g.drawStock(dst)
 	g.drawToolbar(dst)
+	g.drawWaveHUD(dst)
 	if g.selected != 0 {
 		if b := g.w.Buildings[g.selected]; b != nil {
 			g.drawInfo(dst, b)
@@ -90,7 +91,7 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 	}
 
 	// hint line
-	hint := "ЛКМ — будувати/обрати · ПКМ — знести · R — повернути · V — розвернути лінію · Ctrl+тягни — копіювати/знести область · F1 — довідка"
+	hint := "ЛКМ — будувати/обрати · ПКМ — знести · R — повернути · T — дослідження · V — розвернути лінію · Ctrl+тягни — копіювати/знести · F1 — довідка"
 	if g.pasting {
 		hint = "Вставка: ЛКМ — поставити · R — повернути · ПКМ або Esc — скасувати"
 	}
@@ -107,12 +108,19 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 				a = (2.8 - age) / 0.6
 			}
 			tw := textWidth(g.toast, 15*u, true) + 32*u
-			r := rect{W/2 - tw/2, 18 * u, tw, 38 * u}
+			ty := 92 * u
+			if len(g.w.Ruins) > 0 {
+				ty += 40 * u
+			}
+			r := rect{W/2 - tw/2, ty, tw, 38 * u}
 			fillRoundRect(dst, float32(r.x), float32(r.y), float32(r.w), float32(r.h), float32(19*u), rgba(0x2E3440, uint8(230*a)))
 			drawText(dst, g.toast, W/2, r.y+9*u, 15*u, true, rgba(0xF4F1EA, uint8(255*a)), alignCenter)
 		}
 	}
 
+	if g.research {
+		g.drawResearch(dst)
+	}
 	if g.help {
 		g.drawHelp(dst)
 	}
@@ -129,7 +137,7 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 			items = append(items, it)
 		}
 	}
-	rows := (len(items) + 1) / 2
+	rows := max((len(items)+1)/2, 1)
 	r := rect{14 * u, 14 * u, 250 * u, (44 + float64(rows)*26) * u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
@@ -149,39 +157,6 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 	}
 }
 
-func (g *Game) drawToolbar(dst *ebiten.Image) {
-	u := g.ui
-	slot, gap := 64*u, 8*u
-	n := float64(len(toolbar))
-	tw := n*slot + (n-1)*gap + 20*u
-	r := rect{g.cam.W/2 - tw/2, g.cam.H - slot - 60*u, tw, slot + 20*u}
-	panel(dst, r, u)
-	g.panels = append(g.panels, r)
-	for i, k := range toolbar {
-		k := k
-		sr := rect{r.x + 10*u + float64(i)*(slot+gap), r.y + 10*u, slot, slot}
-		bg := rgb(0xF7F4EE)
-		if g.tool == k {
-			bg = mix(colBody, colOK, 0.25)
-		}
-		fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), bg)
-		if g.tool == k {
-			strokeRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), float32(2*u), colOK)
-		}
-		g.iconBuilding(dst, k, sr.x+12*u, sr.y+10*u, slot-24*u, sim.East)
-		afford := g.w.CanAfford(k)
-		nc := colInkSoft
-		if !afford {
-			nc = colBad
-		}
-		drawText(dst, fmt.Sprint(i+1), sr.x+5*u, sr.y+2*u, 11*u, true, nc, alignLeft)
-		g.addButton(sr, func() { g.selectTool(k) })
-		if sr.has(g.mouseX, g.mouseY) {
-			g.buildTooltip(dst, k)
-		}
-	}
-}
-
 func (g *Game) costLine(k sim.Kind) string {
 	s := ""
 	for i, c := range sim.Builds[k].Cost {
@@ -195,8 +170,13 @@ func (g *Game) costLine(k sim.Kind) string {
 
 func (g *Game) buildTooltip(dst *ebiten.Image, k sim.Kind) {
 	def := sim.Builds[k]
-	body := def.Desc + "\nЦіна: " + g.costLine(k)
-	if !g.w.CanAfford(k) {
+	body := wrap(def.Desc, 52) + "\nЦіна: " + g.costLine(k)
+	switch {
+	case !g.w.Unlocked(k):
+		body += "\nЗакрито. Відкрий у дослідженні «" + sim.TechByID(sim.TechFor(k)).Name + "» (T)"
+	case g.w.Free[k] > 0:
+		body += fmt.Sprintf("\nБезкоштовно ще: %d", g.w.Free[k])
+	case !g.w.CanAfford(k):
 		body += "\nБракує ресурсів у ядрі"
 	}
 	g.tooltip(dst, def.Name, body)
@@ -258,7 +238,34 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 		return float64(1+countLines(wrap(def.Desc, 38))) * 17 * u
 	})
 
+	if b.Dmg > 0 {
+		add(func(y float64) float64 {
+			max := g.w.MaxHP(b)
+			drawText(dst, fmt.Sprintf("Міцність: %.0f / %.0f", max-b.Dmg, max), r.x+pad, y, 12.5*u, false, colBad, alignLeft)
+			return 22 * u
+		})
+	}
 	switch b.Kind {
+	case sim.KTurret:
+		add(func(y float64) float64 {
+			msg := fmt.Sprintf("Набоїв: %d пострілів (макс. %d)", b.Ammo, sim.TurretAmmoCap)
+			c := colInk
+			if b.Ammo == 0 {
+				msg, c = "Без набоїв! Підвези «Набої» конвеєром.", colBad
+			}
+			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
+			return 22 * u
+		})
+	case sim.KFlamer:
+		add(func(y float64) float64 {
+			msg := fmt.Sprintf("Паливо: %d%%", int(b.Ammo)*100/sim.FlamerFuelCap)
+			c := colInk
+			if b.Ammo == 0 {
+				msg, c = "Без палива! Підвези вугілля конвеєром.", colBad
+			}
+			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
+			return 22 * u
+		})
 	case sim.KMiner:
 		add(func(y float64) float64 {
 			if b.MinerItem == sim.ItemNone {
@@ -287,6 +294,14 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 				}
 				fillRoundRect(dst, float32(rr.x), float32(rr.y), float32(rr.w), float32(rr.h), float32(6*u), bg)
 				g.recipeRow(dst, sim.Recipes[ri], rr.x+8*u, rr.y+15*u)
+				if !g.w.RecipeUnlocked(ri) {
+					fillRoundRect(dst, float32(rr.x), float32(rr.y), float32(rr.w), float32(rr.h), float32(6*u), rgba(0xF4F0E8, 0xD0))
+					lockGlyph(dst, float32(rr.x+rr.w-16*u), float32(rr.y+rr.h/2), float32(14*u), rgb(0x9AA0AC))
+					if rr.has(g.mouseX, g.mouseY) {
+						defer g.tooltip(dst, "Рецепт закрито", "Відкривається дослідженням «"+sim.TechByID(sim.Recipes[ri].Tech).Name+"»")
+					}
+					return 34 * u
+				}
 				g.addButton(rr, func() { g.w.SetRecipe(b.ID, ri) })
 				return 34 * u
 			})
@@ -467,7 +482,7 @@ func (g *Game) dim(dst *ebiten.Image) {
 func (g *Game) drawMenu(dst *ebiten.Image) {
 	u := g.ui
 	g.dim(dst)
-	W, H := 320*u, 290*u
+	W, H := 320*u, 342*u
 	r := rect{g.cam.W/2 - W/2, g.cam.H/2 - H/2, W, H}
 	panel(dst, r, u)
 	drawText(dst, "Потік", r.x+W/2, r.y+20*u, 26*u, true, colInk, alignCenter)
@@ -476,33 +491,41 @@ func (g *Game) drawMenu(dst *ebiten.Image) {
 	y := r.y + 90*u
 	g.bigButton(dst, rect{r.x + 30*u, y, bw, 42 * u}, "Продовжити", func() { g.menu = false })
 	g.bigButton(dst, rect{r.x + 30*u, y + 52*u, bw, 42 * u}, "Зберегти", func() { g.Save(); g.say("Збережено") })
-	g.bigButton(dst, rect{r.x + 30*u, y + 104*u, bw, 42 * u}, "Зберегти й вийти", func() { g.quit = true })
+	peace := "Мирний режим: вимкнено"
+	if g.w.Peaceful {
+		peace = "Мирний режим: увімкнено"
+	}
+	g.bigButton(dst, rect{r.x + 30*u, y + 104*u, bw, 42 * u}, peace, func() {
+		g.w.Peaceful = !g.w.Peaceful
+		if g.w.Peaceful {
+			g.say("Мирний режим: хвилі не приходять")
+		} else {
+			g.say("Хвилі знову приходитимуть")
+		}
+	})
+	g.bigButton(dst, rect{r.x + 30*u, y + 156*u, bw, 42 * u}, "Зберегти й вийти", func() { g.quit = true })
 	ago := time.Since(g.lastSave).Round(time.Second)
 	drawText(dst, fmt.Sprintf("Автозбереження: %v тому", ago), r.x+W/2, r.y+H-30*u, 11.5*u, false, colInkSoft, alignCenter)
 }
 
-const helpText = `Мета зараз: налагодити виробництво і наповнити ядро.
+const helpText = `Будуй фабрику, досліджуй нове й захищай ядро від хвиль.
 
-1. Постав бур (6) на поклад руди. Він видає руду вперед — туди, куди дивиться стрілка.
-2. Протягни конвеєр (1) від бура до печі (7). Піч сама зрозуміє, що плавити.
-3. Від печі веди конвеєр у ядро. Пластини потрапляють у запас, з якого будується все інше.
-4. Збирачу (8) обери рецепт (клацни по ньому): шестерні й дріт теж потрібні для будівництва.
+1. На старті є безкоштовні 1 бур і 10 конвеєрів. Постав бур (6) на сіро-блакитний
+   поклад заліза й протягни конвеєр (1) до ядра — руда піде в запас.
+2. Далі все коштує ресурсів із ядра. Другий бур постав на камінь (бежевий поклад).
+3. Відкрий дослідження (T): «Плавка» дає піч, далі — збирач, склади, логістика, зброя.
+4. Кожні кілька хвилин приходить хвиля ворогів. Таймер і напрямок — угорі.
+   Ядро має слабку гармату, але далі потрібні стіни (Z), вогнемети (X, їдять вугілля)
+   і кулеметні турелі (C, їдять набої зі збирача). Підвози боєприпаси конвеєром.
+5. Зруйноване лишає червоний слід — кнопка «Відбудувати» (B) поставить усе назад.
 
-Логістика
-Тунель (2) — вхід, потім вихід у тому ж напрямку; між ними до 5 клітинок під чим завгодно.
-Розгалужувач (3) ділить потік уліво/вперед/вправо, Об'єднувач (4) чесно зливає до трьох потоків.
-Сортер (5) відправляє обраний предмет убік, решту — прямо.
-
-Поклади: сіро-блакитний — залізо, мідний — мідь, темний — вугілля,
-бежевий — камінь, жовтий — кварцовий пісок.
+Логістика: тунель (2), розгалужувач (3), об'єднувач (4), сортер (5).
 
 Керування
 ЛКМ — поставити (тягни конвеєр мишею) · ПКМ — знести (можна тягнути)
-R / Shift+R — повернути · Q — взяти будівлю під курсором · 0 — без інструмента
-V над конвеєром — розвернути всю лінію
-Ctrl + тягни ЛКМ — скопіювати область · Ctrl + тягни ПКМ — знести область · Ctrl+V — вставити ще раз
-WASD або середня кнопка — камера · колесо — масштаб · Shift — швидше
-Ctrl+S — зберегти (є й автозбереження) · Esc — меню`
+R / Shift+R — повернути · Q — взяти будівлю під курсором · V — розвернути лінію
+Ctrl + тягни ЛКМ — скопіювати область · Ctrl + тягни ПКМ — знести область
+WASD або середня кнопка — камера · колесо — масштаб · Esc — меню (там є мирний режим)`
 
 func (g *Game) drawHelp(dst *ebiten.Image) {
 	u := g.ui

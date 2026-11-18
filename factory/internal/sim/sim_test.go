@@ -6,8 +6,9 @@ import (
 )
 
 func emptyWorld() *World {
-	w := &World{Seed: 1, Buildings: map[int32]*Building{}}
+	w := &World{Seed: 1, Buildings: map[int32]*Building{}, Researched: map[string]bool{}, Peaceful: true}
 	w.initCaches()
+	w.UnlockAll()
 	for i := range w.Stock {
 		w.Stock[i] = 100000
 	}
@@ -79,6 +80,8 @@ func TestCornerAndSideload(t *testing.T) {
 // Miner -> belt -> furnace -> belt -> core produces plates.
 func TestSmeltingChain(t *testing.T) {
 	w := NewWorld(42)
+	w.UnlockAll()
+	w.Peaceful = true
 	for i := range w.Stock {
 		w.Stock[i] = 1000
 	}
@@ -132,31 +135,34 @@ func TestSmeltingChain(t *testing.T) {
 
 func TestPlacementRules(t *testing.T) {
 	w := NewWorld(3)
+	w.UnlockAll()
+	w.Free = [KindCount]int{}
 	if _, err := w.Place(KFurnace, Pos{0, 0}, East, 0); err != ErrOccupied {
 		t.Fatalf("placing on core: %v", err)
 	}
 	if _, err := w.Place(KMiner, Pos{0, 4}, East, 0); err != ErrNoOre {
 		t.Fatalf("miner off ore: %v", err)
 	}
-	w.Stock[IronPlate] = 0
 	if _, err := w.Place(KBelt, Pos{5, 5}, East, 0); err != ErrNoFunds {
 		t.Fatalf("no funds: %v", err)
 	}
-	w.Stock[IronPlate] = 1
+	w.Stock[IronOre] = 1
 	b := mustPlace(t, w, KBelt, Pos{5, 5}, East)
-	if w.Stock[IronPlate] != 0 {
+	if w.Stock[IronOre] != 0 {
 		t.Fatal("belt not paid")
 	}
 	if _, err := w.Place(KBelt, Pos{5, 5}, North, 0); err != nil || b.Dir != North {
 		t.Fatalf("reorient belt: %v", err)
 	}
-	if err := w.Remove(b.ID); err != nil || w.Stock[IronPlate] != 1 {
+	if err := w.Remove(b.ID); err != nil || w.Stock[IronOre] != 1 {
 		t.Fatal("refund failed")
 	}
 }
 
 func TestSaveRoundTrip(t *testing.T) {
 	w := NewWorld(9)
+	w.UnlockAll()
+	w.Stock[IronPlate] = 50
 	mustPlace(t, w, KBelt, Pos{4, 4}, South)
 	mustPlace(t, w, KChest, Pos{4, 6}, East).Store = []Stack{{Gear, 7}}
 	var buf bytes.Buffer
@@ -176,4 +182,17 @@ func TestSaveRoundTrip(t *testing.T) {
 	if w2.OreAt(Pos{13, -5}) != IronOre {
 		t.Fatal("ore not regenerated from seed")
 	}
+}
+
+func roundTrip(t *testing.T, w *World) *World {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := w.Encode(&buf); err != nil {
+		t.Fatal(err)
+	}
+	w2, err := Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w2
 }

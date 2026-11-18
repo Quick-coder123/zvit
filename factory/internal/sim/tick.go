@@ -32,8 +32,15 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepMerger(b)
 		case KSorter:
 			w.stepSorter(b)
+		case KTurret:
+			w.stepTurret(b)
+		case KFlamer:
+			w.stepFlamer(b)
+		case KCore:
+			w.stepCoreGun(b)
 		}
 	}
+	w.updateCombat()
 	// Belts whose front item was blocked get a second chance now that
 	// downstream belts have moved, which keeps lines fully compressed.
 	for _, b := range w.retry {
@@ -54,7 +61,7 @@ func (w *World) stepBelt(b *Building) {
 	if len(b.Belt) == 0 {
 		return
 	}
-	mv := float32(BeltSpeed * DT)
+	mv := float32(w.BeltSpeed() * DT)
 	if np := b.Belt[0].P + mv; np >= 1 {
 		if w.beltOut(b, b.Belt[0].Item, np-1) {
 			b.Belt = b.Belt[1:]
@@ -136,6 +143,18 @@ func inCap(need int) int { return need*2 + 2 }
 // accept offers an item arriving with travel direction d to a non-belt building.
 func (w *World) accept(b *Building, it Item, d Dir) bool {
 	switch b.Kind {
+	case KTurret:
+		if it != Ammo || b.Ammo > TurretAmmoCap-AmmoShots {
+			return false
+		}
+		b.Ammo += AmmoShots
+		return true
+	case KFlamer:
+		if it != Coal || b.Ammo > FlamerFuelCap-CoalFuel {
+			return false
+		}
+		b.Ammo += CoalFuel
+		return true
 	case KTunnel:
 		if b.Exit || d != b.Dir {
 			return false
@@ -224,7 +243,7 @@ func (b *Building) idle() bool {
 
 func (w *World) autoRecipe(k Kind, it Item) int {
 	for _, r := range RecipesFor(k) {
-		if recipeUses(r, it) {
+		if w.RecipeUnlocked(r) && recipeUses(r, it) {
 			return r
 		}
 	}
@@ -237,7 +256,7 @@ func (w *World) stepMiner(b *Building) {
 	}
 	if b.OutN < OutCap {
 		b.Working = true
-		b.Progress += float32(DT / (MinerTime * 4 / float64(b.MinerTiles)))
+		b.Progress += float32(DT * w.MineMul() / (MinerTime * 4 / float64(b.MinerTiles)))
 		if b.Progress >= 1 {
 			b.Progress -= 1
 			b.OutItem = b.MinerItem
@@ -269,7 +288,7 @@ func (w *World) stepCrafter(b *Building) {
 			}
 		}
 		if b.Working {
-			b.Progress += float32(DT / r.Time)
+			b.Progress += float32(DT * w.CraftMul() / r.Time)
 			if b.Progress >= 1 {
 				b.Working = false
 				b.Progress = 0
@@ -323,8 +342,8 @@ func (w *World) pushItem(b *Building, it Item) bool {
 
 // moveLine advances items on a belt-like track of length L tiles,
 // keeping them spaced and stopping the front one at the end.
-func moveLine(items []BeltItem, L float32) {
-	mv := float32(BeltSpeed*DT) / L
+func moveLine(items []BeltItem, L float32, speed float64) {
+	mv := float32(speed*DT) / L
 	sp := BeltSpacing / L
 	limit := float32(1)
 	for i := range items {
@@ -348,12 +367,12 @@ func (w *World) stepTunnel(b *Building) {
 		return
 	}
 	L := float32(k)
-	if np := b.Belt[0].P + float32(BeltSpeed*DT)/L; np >= 1 {
+	if np := b.Belt[0].P + float32(w.BeltSpeed()*DT)/L; np >= 1 {
 		if w.deliver(ex.Pos.Step(ex.Dir), ex.Dir, b.Belt[0].Item, (np-1)*L) {
 			b.Belt = b.Belt[1:]
 		}
 	}
-	moveLine(b.Belt, L)
+	moveLine(b.Belt, L, w.BeltSpeed())
 	if len(b.Belt) > 0 && b.Belt[0].P >= 1 {
 		w.retry = append(w.retry, b)
 	}

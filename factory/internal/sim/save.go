@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-const SaveVersion = 1
+const SaveVersion = 2
 
 type saveFile struct {
 	Version   int
@@ -19,12 +19,25 @@ type saveFile struct {
 	NextID    int32
 	Buildings []*Building
 	Stock     []int
+
+	// v2
+	Free       []int
+	Researched map[string]bool
+	Enemies    []*Enemy
+	Wave       int
+	NextWave   float64
+	WaveAngle  float64
+	Peaceful   bool
+	Ruins      []Spec
+	Kills      int
 }
 
 // Encode writes the world in the save format.
 func (w *World) Encode(out io.Writer) error {
 	zw := gzip.NewWriter(out)
-	sf := saveFile{Version: SaveVersion, Seed: w.Seed, Tick: w.Tick, NextID: w.NextID, Stock: w.Stock[:]}
+	sf := saveFile{Version: SaveVersion, Seed: w.Seed, Tick: w.Tick, NextID: w.NextID, Stock: w.Stock[:],
+		Free: w.Free[:], Researched: w.Researched, Enemies: w.Enemies, Wave: w.Wave, NextWave: w.NextWave,
+		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills}
 	for _, id := range w.Order() {
 		sf.Buildings = append(sf.Buildings, w.Buildings[id])
 	}
@@ -47,13 +60,32 @@ func Decode(in io.Reader) (*World, error) {
 	if sf.Version > SaveVersion {
 		return nil, fmt.Errorf("сейв новішої версії (%d)", sf.Version)
 	}
-	w := &World{Seed: sf.Seed, Tick: sf.Tick, NextID: sf.NextID, Buildings: map[int32]*Building{}}
+	w := &World{Seed: sf.Seed, Tick: sf.Tick, NextID: sf.NextID, Buildings: map[int32]*Building{},
+		Researched: sf.Researched, Enemies: sf.Enemies, Wave: sf.Wave, NextWave: sf.NextWave,
+		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills}
 	copy(w.Stock[:], sf.Stock)
+	copy(w.Free[:], sf.Free)
+	if w.Researched == nil {
+		w.Researched = map[string]bool{}
+	}
 	for _, b := range sf.Buildings {
 		if b.Kind == KNone || b.Kind >= KindCount {
 			continue
 		}
 		w.Buildings[b.ID] = b
+	}
+	if sf.Version < 2 {
+		// Worlds from before research: keep what was built usable.
+		for _, b := range w.Buildings {
+			if id := TechFor(b.Kind); id != "" {
+				w.Researched[id] = true
+				for _, r := range TechByID(id).Req {
+					w.Researched[r] = true
+				}
+			}
+		}
+		w.NextWave = FirstWaveDelay
+		w.WaveAngle = w.rollWaveAngle()
 	}
 	w.initCaches()
 	return w, nil

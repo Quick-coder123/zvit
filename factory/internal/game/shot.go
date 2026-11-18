@@ -61,3 +61,6 @@ func (g *Game) DebugCopy(x0, y0, x1, y1 int) {
 
 // DebugTool selects a build tool.
 func (g *Game) DebugTool(k sim.Kind, d sim.Dir) { g.tool, g.dir = k, d }
+
+// DebugResearch opens the research panel.
+func (g *Game) DebugResearch(on bool) { g.research = on }

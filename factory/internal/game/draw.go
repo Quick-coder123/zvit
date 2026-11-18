@@ -198,6 +198,17 @@ func drawItem(dst *ebiten.Image, it sim.Item, cx, cy, s float32) {
 		fillCircle(dst, cx, cy, h*0.85, dark)
 		fillCircle(dst, cx, cy, h*0.7, c)
 		fillCircle(dst, cx, cy, h*0.28, dark)
+	case sim.ShapeAmmo:
+		for _, off := range []float32{-0.35, 0.35} {
+			bx := cx + h*off
+			fillRoundRect(dst, bx-h*0.24, cy-h*0.35, h*0.48, h*1.15, h*0.1, c)
+			path.MoveTo(bx-h*0.24, cy-h*0.35)
+			path.LineTo(bx, cy-h*0.95)
+			path.LineTo(bx+h*0.24, cy-h*0.35)
+			path.Close()
+			fillPath(dst, rgb(0xB87333))
+			strokeRoundRect(dst, bx-h*0.24, cy-h*0.35, h*0.48, h*1.15, h*0.1, max32(1, s*0.05), dark)
+		}
 	case sim.ShapeCoil:
 		fillCircle(dst, cx, cy, h*0.8, c)
 		strokeCircle(dst, cx, cy, h*0.55, max32(1, s*0.08), dark)
