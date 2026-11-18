@@ -37,6 +37,17 @@ type Building struct {
 
 	// Chest
 	Store []Stack
+
+	// Logistics
+	Filter Item      // sorter
+	Exit   bool      // tunnel: this end is the exit
+	Buf    []BufItem // routers (splitter, merger, sorter)
+}
+
+// BufItem is an item waiting inside a router, remembering where it came from.
+type BufItem struct {
+	Item Item
+	From Dir // travel direction it arrived with
 }
 
 func (b *Building) Size() int { return Builds[b.Kind].Size }
@@ -220,8 +231,25 @@ func (w *World) minerOre(p Pos) (Item, int) {
 	return best, bn
 }
 
+// Spec describes a building to place, including copied settings.
+type Spec struct {
+	Kind    Kind
+	Pos     Pos
+	Dir     Dir
+	Recipe  int  // -1: none / automatic
+	Filter  Item // sorter filter
+	Exit    bool // tunnel end; only used when ExitSet
+	ExitSet bool
+}
+
 // Place builds a structure, paying its cost from the core stock.
 func (w *World) Place(k Kind, p Pos, d Dir, owner uint8) (*Building, error) {
+	return w.PlaceSpec(Spec{Kind: k, Pos: p, Dir: d, Recipe: -1}, owner)
+}
+
+// PlaceSpec builds a structure from a full spec (used by copy/paste).
+func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
+	k, p, d := sp.Kind, sp.Pos, sp.Dir
 	if k == KBelt {
 		if b := w.At(p); b != nil && b.Kind == KBelt {
 			if b.Dir != d {
@@ -243,10 +271,71 @@ func (w *World) Place(k Kind, p Pos, d Dir, owner uint8) (*Building, error) {
 		b.MinerItem, b.MinerTiles = w.minerOre(p)
 	case KFurnace:
 		b.AutoRecipe = true
+	case KTunnel:
+		if sp.ExitSet {
+			b.Exit = sp.Exit
+		} else {
+			b.Exit = w.TunnelWouldExit(p, d)
+		}
+	case KSorter:
+		b.Filter = sp.Filter
 	}
 	w.add(b)
+	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k {
+		w.SetRecipe(b.ID, sp.Recipe)
+	}
 	w.refreshAround(p)
 	return b, nil
+}
+
+// SpecOf captures a building's settings for copying.
+func SpecOf(b *Building) Spec {
+	return Spec{Kind: b.Kind, Pos: b.Pos, Dir: b.Dir, Recipe: b.Recipe, Filter: b.Filter, Exit: b.Exit, ExitSet: b.Kind == KTunnel}
+}
+
+// TunnelWouldExit decides whether a new tunnel at p becomes the exit of an
+// unpaired entrance behind it.
+func (w *World) TunnelWouldExit(p Pos, d Dir) bool {
+	back := d.Opp()
+	q := p
+	for k := 1; k <= TunnelMax+1; k++ {
+		q = q.Step(back)
+		tb := w.At(q)
+		if tb != nil && tb.Kind == KTunnel && tb.Dir == d {
+			if tb.Exit {
+				return false
+			}
+			ex, _ := w.TunnelExit(tb)
+			return ex == nil
+		}
+	}
+	return false
+}
+
+// TunnelExit finds the exit paired with entrance b and the distance to it.
+func (w *World) TunnelExit(b *Building) (*Building, int) {
+	if b.Kind != KTunnel || b.Exit {
+		return nil, 0
+	}
+	q := b.Pos
+	for k := 1; k <= TunnelMax+1; k++ {
+		q = q.Step(b.Dir)
+		tb := w.At(q)
+		if tb != nil && tb.Kind == KTunnel && tb.Dir == b.Dir {
+			if tb.Exit {
+				return tb, k
+			}
+			return nil, 0
+		}
+	}
+	return nil, 0
+}
+
+// SetFilter sets a sorter's filter item.
+func (w *World) SetFilter(id int32, it Item) {
+	if b := w.Buildings[id]; b != nil && b.Kind == KSorter {
+		b.Filter = it
+	}
 }
 
 // Remove deletes a building and refunds its cost and contents to the core.
@@ -269,6 +358,9 @@ func (w *World) Remove(id int32) error {
 	}
 	for _, s := range b.Store {
 		w.Stock[s.Item] += s.N
+	}
+	for _, bi := range b.Buf {
+		w.Stock[bi.Item]++
 	}
 	w.Stock[b.OutItem] += b.OutN
 	w.Stock[ItemNone] = 0
@@ -338,4 +430,94 @@ func (w *World) refreshCurve(b *Building) {
 	} else if right && !left {
 		b.Curve = 1
 	}
+}
+
+// beltPrev returns the belt feeding b as part of the same line (straight or
+// curve), or nil.
+func (w *World) beltPrev(b *Building) *Building {
+	p := b.Pos
+	var q Pos
+	switch b.Curve {
+	case 0:
+		q = p.Step(b.Dir.Opp())
+	case -1:
+		q = p.Step(b.Dir.CCW())
+	default:
+		q = p.Step(b.Dir.CW())
+	}
+	if w.feeds(q, p) {
+		return w.At(q)
+	}
+	return nil
+}
+
+func (w *World) beltNext(b *Building) *Building {
+	n := w.At(b.Pos.Step(b.Dir))
+	if n != nil && n.Kind == KBelt && w.beltPrev(n) == b {
+		return n
+	}
+	return nil
+}
+
+// BeltLine returns the connected belt line through b in flow order.
+func (w *World) BeltLine(b *Building) (line []*Building, ring bool) {
+	if b == nil || b.Kind != KBelt {
+		return nil, false
+	}
+	start := b
+	seen := map[int32]bool{b.ID: true}
+	for {
+		p := w.beltPrev(start)
+		if p == nil {
+			break
+		}
+		if seen[p.ID] {
+			ring = p == b || ring
+			break
+		}
+		seen[p.ID] = true
+		start = p
+	}
+	if ring {
+		start = b
+	}
+	seen = map[int32]bool{}
+	for c := start; c != nil && !seen[c.ID]; c = w.beltNext(c) {
+		seen[c.ID] = true
+		line = append(line, c)
+	}
+	return line, ring
+}
+
+// ReverseLine flips the direction of the whole belt line through b.
+func (w *World) ReverseLine(b *Building) int {
+	line, ring := w.BeltLine(b)
+	if len(line) == 0 {
+		return 0
+	}
+	dirs := make([]Dir, len(line))
+	for i, c := range line {
+		switch {
+		case i > 0:
+			dirs[i], _ = DirBetween(c.Pos, line[i-1].Pos)
+		case ring:
+			dirs[i], _ = DirBetween(c.Pos, line[len(line)-1].Pos)
+		default:
+			dirs[i] = c.Dir.Opp()
+		}
+	}
+	for i, c := range line {
+		c.Dir = dirs[i]
+		n := len(c.Belt)
+		for j := 0; j < n/2; j++ {
+			c.Belt[j], c.Belt[n-1-j] = c.Belt[n-1-j], c.Belt[j]
+		}
+		for j := range c.Belt {
+			c.Belt[j].P = 1 - c.Belt[j].P
+		}
+	}
+	for _, c := range line {
+		w.refreshAround(c.Pos)
+	}
+	return len(line)
 }

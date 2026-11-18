@@ -15,7 +15,7 @@ import (
 const autosaveEvery = 30 * time.Second
 
 // Toolbar order; index+1 is the hotkey.
-var toolbar = []sim.Kind{sim.KBelt, sim.KMiner, sim.KFurnace, sim.KAssembler, sim.KChest}
+var toolbar = []sim.Kind{sim.KBelt, sim.KTunnel, sim.KSplitter, sim.KMerger, sim.KSorter, sim.KMiner, sim.KFurnace, sim.KAssembler, sim.KChest}
 
 type Game struct {
 	w        *sim.World
@@ -51,6 +51,16 @@ type Game struct {
 
 	shot      *shotState
 	fakeMouse bool
+
+	// area selection (Ctrl+drag) and copy/paste
+	selecting bool
+	selDelete bool
+	selStart  sim.Pos
+	clip      []sim.Spec // positions relative to the clip's top-left
+	clipW     int
+	clipH     int
+	pasting   bool
+	iconMode  bool // drawing toolbar icons, not the world
 }
 
 // New creates the game around a world; savePath is used for autosave.
@@ -138,6 +148,10 @@ func (g *Game) handleInput() {
 		switch {
 		case g.help:
 			g.help = false
+		case g.selecting:
+			g.selecting = false
+		case g.pasting:
+			g.pasting = false
 		case g.tool != sim.KNone:
 			g.tool = sim.KNone
 		case g.selected != 0:
@@ -218,7 +232,13 @@ func (g *Game) handleInput() {
 		g.tool = sim.KNone
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		if g.tool != sim.KNone {
+		if g.pasting {
+			g.rotateClip()
+			if shift {
+				g.rotateClip()
+				g.rotateClip()
+			}
+		} else if g.tool != sim.KNone {
 			if shift {
 				g.dir = g.dir.CCW()
 			} else {
@@ -229,14 +249,57 @@ func (g *Game) handleInput() {
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyQ) {
+		g.pasting = false
 		if b := g.w.At(g.hover); b != nil && sim.Builds[b.Kind].Buildable {
 			g.tool, g.dir = b.Kind, b.Dir
 		} else {
 			g.tool = sim.KNone
 		}
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if ctrl {
+			if len(g.clip) > 0 {
+				g.pasting, g.tool, g.selected = true, sim.KNone, 0
+			} else {
+				g.say("Буфер порожній: затисни Ctrl і виділи ділянку лівою кнопкою")
+			}
+		} else if b := g.w.At(g.hover); b != nil && b.Kind == sim.KBelt {
+			g.say("Лінію розвернуто: %d клітинок", g.w.ReverseLine(b))
+		}
+	}
 
-	if g.overUI && !g.dragging && !g.erasing {
+	if g.overUI && !g.dragging && !g.erasing && !g.selecting {
+		return
+	}
+
+	// Ctrl+drag: select an area to copy (left) or demolish (right)
+	if ctrl && !g.selecting {
+		l := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft)
+		r := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight)
+		if l || r {
+			g.selecting, g.selDelete, g.selStart = true, r, g.hover
+			g.pasting, g.tool = false, sim.KNone
+			return
+		}
+	}
+	if g.selecting {
+		btn := ebiten.MouseButtonLeft
+		if g.selDelete {
+			btn = ebiten.MouseButtonRight
+		}
+		if !ebiten.IsMouseButtonPressed(btn) {
+			g.selecting = false
+			g.finishSelection()
+		}
+		return
+	}
+	if g.pasting {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			g.doPaste()
+		}
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+			g.pasting = false
+		}
 		return
 	}
 
@@ -349,12 +412,133 @@ func sign(a int) int {
 	return 0
 }
 
+// selRect returns the tile rectangle of the current selection.
+func (g *Game) selRect() (x0, y0, x1, y1 int) {
+	x0, x1 = g.selStart.X, g.hover.X
+	y0, y1 = g.selStart.Y, g.hover.Y
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	if y0 > y1 {
+		y0, y1 = y1, y0
+	}
+	return
+}
+
+func (g *Game) finishSelection() {
+	x0, y0, x1, y1 := g.selRect()
+	seen := map[int32]bool{}
+	var hit []*sim.Building
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			if b := g.w.At(sim.Pos{X: x, Y: y}); b != nil && !seen[b.ID] && b.Kind != sim.KCore {
+				seen[b.ID] = true
+				hit = append(hit, b)
+			}
+		}
+	}
+	if len(hit) == 0 {
+		return
+	}
+	if g.selDelete {
+		for _, b := range hit {
+			g.w.Remove(b.ID)
+		}
+		g.selected = 0
+		g.say("Знесено: %d", len(hit))
+		return
+	}
+	minX, minY, maxX, maxY := hit[0].Pos.X, hit[0].Pos.Y, 0, 0
+	for _, b := range hit {
+		minX, minY = min(minX, b.Pos.X), min(minY, b.Pos.Y)
+	}
+	g.clip = g.clip[:0]
+	for _, b := range hit {
+		sp := sim.SpecOf(b)
+		sp.Pos = sim.Pos{X: b.Pos.X - minX, Y: b.Pos.Y - minY}
+		maxX = max(maxX, sp.Pos.X+b.Size())
+		maxY = max(maxY, sp.Pos.Y+b.Size())
+		g.clip = append(g.clip, sp)
+	}
+	g.clipW, g.clipH = maxX, maxY
+	g.pasting = true
+	g.say("Скопійовано: %d. ЛКМ — вставити, R — повернути, ПКМ — скасувати", len(hit))
+}
+
+// rotateClip turns the clipboard 90° clockwise.
+func (g *Game) rotateClip() {
+	for i := range g.clip {
+		sp := &g.clip[i]
+		n := sim.Builds[sp.Kind].Size
+		sp.Pos = sim.Pos{X: g.clipH - sp.Pos.Y - n, Y: sp.Pos.X}
+		sp.Dir = sp.Dir.CW()
+	}
+	g.clipW, g.clipH = g.clipH, g.clipW
+}
+
+func (g *Game) pasteAnchor() sim.Pos {
+	return sim.Pos{X: g.hover.X - g.clipW/2, Y: g.hover.Y - g.clipH/2}
+}
+
+func (g *Game) doPaste() {
+	a := g.pasteAnchor()
+	ok, funds := 0, false
+	for _, sp := range g.clip {
+		sp.Pos = sp.Pos.Add(a.X, a.Y)
+		if _, err := g.w.PlaceSpec(sp, 0); err == nil {
+			ok++
+		} else if err == sim.ErrNoFunds {
+			funds = true
+		}
+	}
+	switch {
+	case ok == len(g.clip):
+		g.say("Вставлено: %d", ok)
+	case funds:
+		g.say("Вставлено %d з %d — бракує ресурсів", ok, len(g.clip))
+	default:
+		g.say("Вставлено %d з %d — частина місць зайнята", ok, len(g.clip))
+	}
+}
+
 // drawGhost previews the building under the cursor.
 func (g *Game) drawGhost(dst *ebiten.Image) {
+	s := float32(g.cam.Scale)
+	if g.selecting {
+		x0, y0, x1, y1 := g.selRect()
+		sx, sy := g.cam.ToScreen(float64(x0), float64(y0))
+		ex, ey := g.cam.ToScreen(float64(x1+1), float64(y1+1))
+		c, f := rgba(0x4FA3A5, 0xDD), rgba(0x4FA3A5, 0x30)
+		if g.selDelete {
+			c, f = rgba(0xE07A5F, 0xDD), rgba(0xE07A5F, 0x30)
+		}
+		fillRect(dst, sx, sy, ex-sx, ey-sy, f)
+		strokeRoundRect(dst, sx, sy, ex-sx, ey-sy, 2, max32(1.5, s*0.05), c)
+		return
+	}
 	if g.menu || g.overUI {
 		return
 	}
-	s := float32(g.cam.Scale)
+	if g.pasting {
+		a := g.pasteAnchor()
+		for _, sp := range g.clip {
+			p := sp.Pos.Add(a.X, a.Y)
+			gb := &sim.Building{Kind: sp.Kind, Pos: p, Dir: sp.Dir, Recipe: sp.Recipe, Filter: sp.Filter, Exit: sp.Exit}
+			if sp.Kind == sim.KBelt {
+				x, y := g.cam.ToScreen(float64(p.X), float64(p.Y))
+				straightBase(dst, x, y, s, sp.Dir, rgba(0xD8D1C4, 0x99))
+				triangle(dst, x+s/2, y+s/2, dirAngle(sp.Dir), s*0.35, rgba(0xBDB3A2, 0xBB))
+			} else {
+				g.drawBuilding(dst, gb, 0.55)
+			}
+			if g.w.CheckPlace(sp.Kind, p, sp.Dir) != nil {
+				x, y := g.cam.ToScreen(float64(p.X), float64(p.Y))
+				w := s * float32(sim.Builds[sp.Kind].Size)
+				fillRoundRect(dst, x+1, y+1, w-2, w-2, s*0.15, rgba(0xE07A5F, 0x55))
+			}
+		}
+		return
+	}
 	if g.tool == sim.KNone {
 		if b := g.w.At(g.hover); b != nil {
 			x, y := g.cam.ToScreen(float64(b.Pos.X), float64(b.Pos.Y))
@@ -365,8 +549,11 @@ func (g *Game) drawGhost(dst *ebiten.Image) {
 	}
 	p := g.footprint(g.tool)
 	ghost := &sim.Building{Kind: g.tool, Pos: p, Dir: g.dir, Recipe: -1}
-	if g.tool == sim.KMiner {
+	switch g.tool {
+	case sim.KMiner:
 		ghost.MinerItem = g.w.OreAt(p)
+	case sim.KTunnel:
+		ghost.Exit = g.w.TunnelWouldExit(p, g.dir)
 	}
 	ok := g.w.CheckPlace(g.tool, p, g.dir) == nil
 	g.drawBuilding(dst, ghost, 0.6)

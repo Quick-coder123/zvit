@@ -24,12 +24,27 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepCrafter(b)
 		case KChest:
 			w.stepChest(b)
+		case KTunnel:
+			w.stepTunnel(b)
+		case KSplitter:
+			w.stepSplitter(b)
+		case KMerger:
+			w.stepMerger(b)
+		case KSorter:
+			w.stepSorter(b)
 		}
 	}
 	// Belts whose front item was blocked get a second chance now that
 	// downstream belts have moved, which keeps lines fully compressed.
 	for _, b := range w.retry {
-		if len(b.Belt) > 0 && b.Belt[0].P >= 1 && w.beltOut(b, b.Belt[0].Item, 0) {
+		if len(b.Belt) == 0 || b.Belt[0].P < 1 {
+			continue
+		}
+		if b.Kind == KTunnel {
+			if ex, _ := w.TunnelExit(b); ex != nil && w.deliver(ex.Pos.Step(ex.Dir), ex.Dir, b.Belt[0].Item, 0) {
+				b.Belt = b.Belt[1:]
+			}
+		} else if w.beltOut(b, b.Belt[0].Item, 0) {
 			b.Belt = b.Belt[1:]
 		}
 	}
@@ -75,7 +90,7 @@ func (w *World) deliver(t Pos, d Dir, it Item, overflow float32) bool {
 	if tb.Kind == KBelt {
 		return w.beltInsert(tb, d, it, overflow)
 	}
-	return w.accept(tb, it)
+	return w.accept(tb, it, d)
 }
 
 // beltInsert puts an item on belt tb that arrives travelling in direction d.
@@ -118,9 +133,39 @@ func (w *World) beltInsert(tb *Building, d Dir, it Item, overflow float32) bool 
 
 func inCap(need int) int { return need*2 + 2 }
 
-// accept offers an item to a non-belt building.
-func (w *World) accept(b *Building, it Item) bool {
+// accept offers an item arriving with travel direction d to a non-belt building.
+func (w *World) accept(b *Building, it Item, d Dir) bool {
 	switch b.Kind {
+	case KTunnel:
+		if b.Exit || d != b.Dir {
+			return false
+		}
+		_, k := w.TunnelExit(b)
+		if k == 0 {
+			return false
+		}
+		if n := len(b.Belt); n > 0 && b.Belt[n-1].P < BeltSpacing/float32(k) {
+			return false
+		}
+		b.Belt = append(b.Belt, BeltItem{it, 0})
+		return true
+	case KSplitter, KSorter:
+		if d != b.Dir || len(b.Buf) >= RouterCap {
+			return false
+		}
+		b.Buf = append(b.Buf, BufItem{it, d})
+		return true
+	case KMerger:
+		if d == b.Dir.Opp() {
+			return false
+		}
+		for _, bi := range b.Buf {
+			if bi.From == d {
+				return false
+			}
+		}
+		b.Buf = append(b.Buf, BufItem{it, d})
+		return true
 	case KCore:
 		w.Stock[it]++
 		return true
@@ -274,4 +319,112 @@ func (w *World) pushItem(b *Building, it Item) bool {
 		}
 	}
 	return false
+}
+
+// moveLine advances items on a belt-like track of length L tiles,
+// keeping them spaced and stopping the front one at the end.
+func moveLine(items []BeltItem, L float32) {
+	mv := float32(BeltSpeed*DT) / L
+	sp := BeltSpacing / L
+	limit := float32(1)
+	for i := range items {
+		np := items[i].P + mv
+		if np > limit {
+			np = limit
+		}
+		if np > items[i].P {
+			items[i].P = np
+		}
+		limit = items[i].P - sp
+	}
+}
+
+func (w *World) stepTunnel(b *Building) {
+	if b.Exit || len(b.Belt) == 0 {
+		return
+	}
+	ex, k := w.TunnelExit(b)
+	if ex == nil {
+		return
+	}
+	L := float32(k)
+	if np := b.Belt[0].P + float32(BeltSpeed*DT)/L; np >= 1 {
+		if w.deliver(ex.Pos.Step(ex.Dir), ex.Dir, b.Belt[0].Item, (np-1)*L) {
+			b.Belt = b.Belt[1:]
+		}
+	}
+	moveLine(b.Belt, L)
+	if len(b.Belt) > 0 && b.Belt[0].P >= 1 {
+		w.retry = append(w.retry, b)
+	}
+}
+
+// pushDir hands an item to the neighbour in direction d.
+func (w *World) pushDir(b *Building, it Item, d Dir) bool {
+	t := b.Pos.Step(d)
+	tb := w.At(t)
+	if tb == nil || (tb.Kind == KBelt && tb.Dir == d.Opp()) {
+		return false
+	}
+	return w.deliver(t, d, it, 0)
+}
+
+func (b *Building) popBuf(i int) {
+	b.Buf = append(b.Buf[:i], b.Buf[i+1:]...)
+}
+
+func (w *World) stepSplitter(b *Building) {
+	if len(b.Buf) == 0 {
+		return
+	}
+	outs := [3]Dir{b.Dir.CCW(), b.Dir, b.Dir.CW()}
+	for i := 0; i < 3; i++ {
+		k := (b.OutRR + i) % 3
+		if w.pushDir(b, b.Buf[0].Item, outs[k]) {
+			b.popBuf(0)
+			b.OutRR = k + 1
+			return
+		}
+	}
+}
+
+func (w *World) stepMerger(b *Building) {
+	if len(b.Buf) == 0 {
+		return
+	}
+	ins := [3]Dir{b.Dir.CW(), b.Dir, b.Dir.CCW()}
+	for i := 0; i < 3; i++ {
+		k := (b.OutRR + i) % 3
+		for j, bi := range b.Buf {
+			if bi.From == ins[k] {
+				if w.pushDir(b, bi.Item, b.Dir) {
+					b.popBuf(j)
+					b.OutRR = k + 1
+				}
+				return
+			}
+		}
+	}
+}
+
+func (w *World) stepSorter(b *Building) {
+	if len(b.Buf) == 0 {
+		return
+	}
+	it := b.Buf[0].Item
+	if b.Filter == ItemNone || it != b.Filter {
+		if w.pushDir(b, it, b.Dir) {
+			b.popBuf(0)
+		}
+		return
+	}
+	outs := [2]Dir{b.Dir.CCW(), b.Dir.CW()}
+	for i := 0; i < 2; i++ {
+		k := (b.OutRR + i) % 2
+		if w.pushDir(b, it, outs[k]) {
+			b.popBuf(0)
+			b.OutRR = k + 1
+			return
+		}
+	}
 }

@@ -48,6 +48,8 @@ func panel(dst *ebiten.Image, r rect, u float64) {
 // iconBuilding draws a small picture of a building kind in a box at (x,y).
 func (g *Game) iconBuilding(dst *ebiten.Image, k sim.Kind, x, y, size float64, d sim.Dir) {
 	saved := g.cam
+	g.iconMode = true
+	defer func() { g.iconMode = false }()
 	n := float64(sim.Builds[k].Size)
 	g.cam.Scale = size / n
 	g.cam.X = (g.cam.W/2 - x) / g.cam.Scale
@@ -88,7 +90,10 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 	}
 
 	// hint line
-	hint := "ЛКМ — будувати/обрати · ПКМ — знести · R — повернути · Q — піпетка · WASD — камера · F1 — довідка"
+	hint := "ЛКМ — будувати/обрати · ПКМ — знести · R — повернути · V — розвернути лінію · Ctrl+тягни — копіювати/знести область · F1 — довідка"
+	if g.pasting {
+		hint = "Вставка: ЛКМ — поставити · R — повернути · ПКМ або Esc — скасувати"
+	}
 	hw := textWidth(hint, 12*u, false) + 24*u
 	fillRoundRect(dst, float32(W/2-hw/2), float32(H-30*u), float32(hw), float32(22*u), float32(11*u), rgba(0xF4F1EA, 0xD8))
 	drawText(dst, hint, W/2, H-27*u, 12*u, false, colInkSoft, alignCenter)
@@ -319,6 +324,60 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			}
 			return 42 * u
 		})
+	case sim.KSorter:
+		add(func(y float64) float64 {
+			drawText(dst, "Фільтр (іде вбік)", r.x+pad, y, 13*u, true, colInk, alignLeft)
+			return 24 * u
+		})
+		add(func(y float64) float64 {
+			cell := 34 * u
+			cols := int((W - 2*pad) / cell)
+			opts := []sim.Item{sim.ItemNone}
+			for it := sim.Item(1); it < sim.ItemCount; it++ {
+				opts = append(opts, it)
+			}
+			for i, it := range opts {
+				it := it
+				cr := rect{r.x + pad + float64(i%cols)*cell, y + float64(i/cols)*cell, cell - 4*u, cell - 4*u}
+				bg := rgb(0xF4F0E8)
+				if b.Filter == it {
+					bg = mix(colBody, colOK, 0.35)
+				} else if cr.has(g.mouseX, g.mouseY) {
+					bg = rgb(0xE9E2D4)
+				}
+				fillRoundRect(dst, float32(cr.x), float32(cr.y), float32(cr.w), float32(cr.h), float32(6*u), bg)
+				if it == sim.ItemNone {
+					drawText(dst, "—", cr.x+cr.w/2, cr.y+cr.h/2-9*u, 14*u, true, colInkSoft, alignCenter)
+				} else {
+					drawItem(dst, it, float32(cr.x+cr.w/2), float32(cr.y+cr.h/2), float32(18*u))
+				}
+				if cr.has(g.mouseX, g.mouseY) {
+					name := "Без фільтра: все йде прямо"
+					if it != sim.ItemNone {
+						name = sim.Items[it].Name
+					}
+					defer g.tooltip(dst, name, "")
+				}
+				g.addButton(cr, func() { g.w.SetFilter(b.ID, it) })
+			}
+			rows := (len(opts) + cols - 1) / cols
+			return float64(rows)*cell + 6*u
+		})
+	case sim.KTunnel:
+		add(func(y float64) float64 {
+			msg := "Вихід тунелю."
+			c := colInk
+			if !b.Exit {
+				if ex, k := g.w.TunnelExit(b); ex != nil {
+					msg = fmt.Sprintf("Вхід. З'єднаний з виходом через %d клітинок.", k-1)
+				} else {
+					msg = "Вхід без виходу. Постав ще один тунель\nу тому ж напрямку не далі ніж за 5 клітинок."
+					c = colBad
+				}
+			}
+			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
+			return float64(countLines(msg))*18*u + 6*u
+		})
 	case sim.KChest:
 		add(func(y float64) float64 {
 			drawText(dst, fmt.Sprintf("Заповнено: %d / %d", b.StoreCount(), sim.ChestCap), r.x+pad, y, 13*u, false, colInk, alignLeft)
@@ -424,10 +483,15 @@ func (g *Game) drawMenu(dst *ebiten.Image) {
 
 const helpText = `Мета зараз: налагодити виробництво і наповнити ядро.
 
-1. Постав бур (2) на поклад руди. Він видає руду вперед — туди, куди дивиться стрілка.
-2. Протягни конвеєр (1) від бура до печі (3). Піч сама зрозуміє, що плавити.
+1. Постав бур (6) на поклад руди. Він видає руду вперед — туди, куди дивиться стрілка.
+2. Протягни конвеєр (1) від бура до печі (7). Піч сама зрозуміє, що плавити.
 3. Від печі веди конвеєр у ядро. Пластини потрапляють у запас, з якого будується все інше.
-4. Збирачу (4) обери рецепт (клацни по ньому): шестерні й дріт теж потрібні для будівництва.
+4. Збирачу (8) обери рецепт (клацни по ньому): шестерні й дріт теж потрібні для будівництва.
+
+Логістика
+Тунель (2) — вхід, потім вихід у тому ж напрямку; між ними до 5 клітинок під чим завгодно.
+Розгалужувач (3) ділить потік уліво/вперед/вправо, Об'єднувач (4) чесно зливає до трьох потоків.
+Сортер (5) відправляє обраний предмет убік, решту — прямо.
 
 Поклади: сіро-блакитний — залізо, мідний — мідь, темний — вугілля,
 бежевий — камінь, жовтий — кварцовий пісок.
@@ -435,6 +499,8 @@ const helpText = `Мета зараз: налагодити виробництв
 Керування
 ЛКМ — поставити (тягни конвеєр мишею) · ПКМ — знести (можна тягнути)
 R / Shift+R — повернути · Q — взяти будівлю під курсором · 0 — без інструмента
+V над конвеєром — розвернути всю лінію
+Ctrl + тягни ЛКМ — скопіювати область · Ctrl + тягни ПКМ — знести область · Ctrl+V — вставити ще раз
 WASD або середня кнопка — камера · колесо — масштаб · Shift — швидше
 Ctrl+S — зберегти (є й автозбереження) · Esc — меню`
 

@@ -11,6 +11,10 @@ const (
 	KAssembler
 	KChest
 	KCore
+	KTunnel
+	KSplitter
+	KMerger
+	KSorter
 	KindCount
 )
 
@@ -53,6 +57,26 @@ var Builds = [KindCount]BuildDef{
 		Name: "Ядро", Size: 3,
 		Desc: "Серце бази. Все, що сюди привезено, йде в загальний запас.",
 	},
+	KTunnel: {
+		Name: "Тунель", Size: 1, Buildable: true,
+		Desc: "Проводить стрічку під іншими будівлями. Постав вхід, потім вихід у тому ж напрямку — до 5 клітинок між ними.",
+		Cost: []Stack{{IronPlate, 5}, {Gear, 1}},
+	},
+	KSplitter: {
+		Name: "Розгалужувач", Size: 1, Buildable: true,
+		Desc: "Бере предмети ззаду й по черзі роздає вліво, вперед і вправо — туди, де є куди класти. Якщо один вихід забився, все йде в інші.",
+		Cost: []Stack{{IronPlate, 4}, {Gear, 2}, {Wire, 2}},
+	},
+	KMerger: {
+		Name: "Об'єднувач", Size: 1, Buildable: true,
+		Desc: "Збирає потоки зліва, ззаду й справа та чесно по черзі випускає вперед.",
+		Cost: []Stack{{IronPlate, 4}, {Gear, 2}},
+	},
+	KSorter: {
+		Name: "Сортер", Size: 1, Buildable: true,
+		Desc: "Обраний предмет відправляє вбік (вліво/вправо), решту — прямо. Клацни, щоб обрати фільтр.",
+		Cost: []Stack{{IronPlate, 4}, {Gear, 2}, {Wire, 4}},
+	},
 }
 
 // Recipe converts inputs to one output stack in a given machine.
@@ -92,4 +116,6 @@ const (
 	ChestCap    = 200
 	MinerTime   = 1.5 // seconds per item with full ore coverage
 	OutCap      = 8
+	TunnelMax   = 5 // tiles between entrance and exit
+	RouterCap   = 2
 )

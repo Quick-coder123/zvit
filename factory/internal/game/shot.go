@@ -2,6 +2,9 @@ package game
 
 import (
 	"image"
+
+	"potik/internal/sim"
+
 	"image/png"
 	"os"
 
@@ -48,3 +51,13 @@ func (g *Game) shotDraw(screen *ebiten.Image) {
 	g.quit = true
 	g.savePath = ""
 }
+
+// DebugCopy copies a tile rectangle into the clipboard and enters paste mode.
+func (g *Game) DebugCopy(x0, y0, x1, y1 int) {
+	g.selStart = sim.Pos{X: x0, Y: y0}
+	g.hover = sim.Pos{X: x1, Y: y1}
+	g.finishSelection()
+}
+
+// DebugTool selects a build tool.
+func (g *Game) DebugTool(k sim.Kind, d sim.Dir) { g.tool, g.dir = k, d }

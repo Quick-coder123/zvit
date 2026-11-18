@@ -54,6 +54,7 @@ func main() {
 	if *shot != "" {
 		w.Seed = 7
 		sim.BuildDemo(w)
+		sim.BuildLogisticsDemo(w)
 		g.SetScreenshot(*shot, *shotFrames, func(g *game.Game) { debugScene(g, w, *shotScene) })
 	}
 	ebiten.SetWindowTitle("Потік")
@@ -80,6 +81,22 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 		}
 	case "help":
 		g.DebugHelp(true)
+	case "logistics":
+		o := sim.LogisticsDemoOrigin
+		g.DebugCamera(float64(o.X)+9, float64(o.Y)+0.5, 46)
+		if b := w.At(o.Add(3, 0)); b != nil {
+			g.DebugSelect(b.ID)
+		}
+	case "paste":
+		o := sim.LogisticsDemoOrigin
+		g.DebugCamera(float64(o.X)+8, float64(o.Y)+3, 34)
+		g.DebugCopy(o.X+5, o.Y-2, o.X+10, o.Y+2)
+		g.DebugMouse(640+34*1, 400+34*4)
+	case "tunnel":
+		o := sim.LogisticsDemoOrigin
+		g.DebugCamera(float64(o.X)+9, float64(o.Y)+0.5, 46)
+		g.DebugTool(sim.KTunnel, sim.East)
+		g.DebugMouse(640+46*7.5, 400+46*3)
 	case "far":
 		g.DebugCamera(0, 0, 9)
 	}

@@ -49,6 +49,10 @@ var (
 		sim.KAssembler: rgb(0x6C8EBF),
 		sim.KChest:     rgb(0xC8A97E),
 		sim.KCore:      rgb(0x2E3440),
+		sim.KTunnel:    rgb(0x5E6B78),
+		sim.KSplitter:  rgb(0x8E7CC3),
+		sim.KMerger:    rgb(0x6FAE7B),
+		sim.KSorter:    rgb(0xD4A373),
 	}
 )
 

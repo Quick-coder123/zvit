@@ -188,9 +188,16 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	bx, by, bw := x+pad, y+pad, w-2*pad
 	t := float64(g.w.Tick) / sim.TPS
 
-	if b.Kind == sim.KBelt {
+	switch b.Kind {
+	case sim.KBelt:
 		fillRoundRect(dst, bx, by, bw, bw, s*0.12, fade(colBeltBase))
 		triangle(dst, x+w/2, y+w/2, dirAngle(b.Dir), s*0.4, fade(colChevron))
+		return
+	case sim.KTunnel:
+		g.drawTunnel(dst, b, x, y, s, fade)
+		return
+	case sim.KSplitter, sim.KMerger, sim.KSorter:
+		g.drawRouter(dst, b, x, y, s, fade)
 		return
 	}
 
@@ -272,5 +279,119 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 		ax := cx + float32(b.Dir.DX())*(bw/2-s*0.02)
 		ay := cy + float32(b.Dir.DY())*(bw/2-s*0.02)
 		triangle(dst, ax, ay, a, s*0.28, fade(mix(acc, colInk, 0.35)))
+	}
+}
+
+// straightBase draws a belt strip across a 1x1 tile in direction d.
+func straightBase(dst *ebiten.Image, x, y, s float32, d sim.Dir, c color.RGBA) {
+	if d == sim.North || d == sim.South {
+		fillRoundRect(dst, x+s*0.1, y+s*0.02, s*0.8, s*0.96, s*0.1, c)
+	} else {
+		fillRoundRect(dst, x+s*0.02, y+s*0.1, s*0.96, s*0.8, s*0.1, c)
+	}
+}
+
+// halfRect returns the half of a tile on side d (toward d).
+func halfRect(x, y, s float32, d sim.Dir) (float32, float32, float32, float32) {
+	switch d {
+	case sim.East:
+		return x + s*0.46, y + s*0.06, s * 0.5, s * 0.88
+	case sim.West:
+		return x + s*0.04, y + s*0.06, s * 0.5, s * 0.88
+	case sim.South:
+		return x + s*0.06, y + s*0.46, s * 0.88, s * 0.5
+	default:
+		return x + s*0.06, y + s*0.04, s * 0.88, s * 0.5
+	}
+}
+
+func (g *Game) drawTunnel(dst *ebiten.Image, b *sim.Building, x, y, s float32, fade func(color.RGBA) color.RGBA) {
+	acc := colAccent[sim.KTunnel]
+	straightBase(dst, x, y, s, b.Dir, fade(colBeltBase))
+	side := b.Dir
+	if b.Exit {
+		side = b.Dir.Opp()
+	}
+	hx, hy, hw, hh := halfRect(x, y, s, side)
+	fillRoundRect(dst, hx+s*0.02, hy+s*0.05, hw, hh, s*0.14, fade(rgba(0x2E3440, 0x22)))
+	fillRoundRect(dst, hx, hy, hw, hh, s*0.14, fade(acc))
+	// dark mouth facing the open belt side
+	cx, cy := hx+hw/2, hy+hh/2
+	ox := -float32(side.DX()) * s * 0.17
+	oy := -float32(side.DY()) * s * 0.17
+	if side == sim.East || side == sim.West {
+		fillRoundRect(dst, cx+ox-s*0.06, cy-s*0.3, s*0.12, s*0.6, s*0.06, fade(colInk))
+	} else {
+		fillRoundRect(dst, cx-s*0.3, cy+oy-s*0.06, s*0.6, s*0.12, s*0.06, fade(colInk))
+	}
+	triangle(dst, cx-ox*0.2, cy-oy*0.2, dirAngle(b.Dir), s*0.22, fade(mix(acc, colBG, 0.7)))
+	if b.Exit {
+		return
+	}
+	// show the connection when relevant
+	if !g.iconMode && (g.tool == sim.KTunnel || g.hover == b.Pos) {
+		ex, k := g.w.TunnelExit(b)
+		c := rgba(0x5E6B78, 0x99)
+		if ex == nil {
+			c = rgba(0xE07A5F, 0x99)
+			k = sim.TunnelMax + 1
+		}
+		for i := 1; i < k; i++ {
+			p := b.Pos
+			for j := 0; j < i; j++ {
+				p = p.Step(b.Dir)
+			}
+			px, py := g.cam.ToScreen(float64(p.X)+0.5, float64(p.Y)+0.5)
+			fillCircle(dst, px, py, s*0.07, fade(c))
+		}
+	}
+}
+
+// arrowTo draws a line from (cx,cy) toward direction d with an arrowhead.
+func arrowTo(dst *ebiten.Image, cx, cy, s float32, d sim.Dir, out bool, c color.RGBA) {
+	ex := cx + float32(d.DX())*s*0.34
+	ey := cy + float32(d.DY())*s*0.34
+	line(dst, cx, cy, ex, ey, max32(1.2, s*0.07), c)
+	a := dirAngle(d)
+	if out {
+		triangle(dst, ex, ey, a, s*0.2, c)
+	} else {
+		triangle(dst, (cx+ex)/2, (cy+ey)/2, a+math.Pi, s*0.18, c)
+	}
+}
+
+func (g *Game) drawRouter(dst *ebiten.Image, b *sim.Building, x, y, s float32, fade func(color.RGBA) color.RGBA) {
+	acc := colAccent[b.Kind]
+	fillRoundRect(dst, x+s*0.04, y+s*0.04, s*0.92, s*0.92, s*0.14, fade(colBeltBase))
+	fillRoundRect(dst, x+s*0.12, y+s*0.15, s*0.76, s*0.76, s*0.16, fade(rgba(0x2E3440, 0x20)))
+	fillRoundRect(dst, x+s*0.12, y+s*0.12, s*0.76, s*0.76, s*0.16, fade(colBody))
+	strokeRoundRect(dst, x+s*0.12, y+s*0.12, s*0.76, s*0.76, s*0.16, max32(1, s*0.05), fade(mix(acc, colInk, 0.3)))
+	cx, cy := x+s/2, y+s/2
+	ink := fade(mix(acc, colInk, 0.35))
+	switch b.Kind {
+	case sim.KSplitter:
+		arrowTo(dst, cx, cy, s, b.Dir.CCW(), true, fade(acc))
+		arrowTo(dst, cx, cy, s, b.Dir.CW(), true, fade(acc))
+		arrowTo(dst, cx, cy, s, b.Dir, true, ink)
+		fillCircle(dst, cx, cy, s*0.08, ink)
+	case sim.KMerger:
+		arrowTo(dst, cx, cy, s, b.Dir.CCW(), false, fade(acc))
+		arrowTo(dst, cx, cy, s, b.Dir.CW(), false, fade(acc))
+		arrowTo(dst, cx, cy, s, b.Dir.Opp(), false, fade(acc))
+		arrowTo(dst, cx, cy, s, b.Dir, true, ink)
+	case sim.KSorter:
+		for _, d := range []sim.Dir{b.Dir.CCW(), b.Dir.CW()} {
+			ex := cx + float32(d.DX())*s*0.3
+			ey := cy + float32(d.DY())*s*0.3
+			triangle(dst, ex, ey, dirAngle(d), s*0.14, fade(acc))
+		}
+		ex := cx + float32(b.Dir.DX())*s*0.3
+		ey := cy + float32(b.Dir.DY())*s*0.3
+		triangle(dst, ex, ey, dirAngle(b.Dir), s*0.16, ink)
+		if b.Filter != sim.ItemNone {
+			drawItem(dst, b.Filter, cx, cy, s*0.32)
+		} else if s >= 16 {
+			drawText(dst, "?", float64(cx), float64(cy-s*0.2), float64(s)*0.34, true, ink, alignCenter)
+		}
 	}
 }

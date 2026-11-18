@@ -53,3 +53,57 @@ func BuildDemo(w *World) {
 	place(KBelt, -2, 0, East)
 	place(KChest, 4, 4, East)
 }
+
+// LogisticsDemoOrigin is where BuildLogisticsDemo lays out its showcase.
+var LogisticsDemoOrigin = Pos{-34, 22}
+
+// BuildLogisticsDemo shows sorter, splitter, merger and tunnel working.
+func BuildLogisticsDemo(w *World) {
+	o := LogisticsDemoOrigin
+	place := func(k Kind, x, y int, d Dir) *Building {
+		b, _ := w.Place(k, o.Add(x, y), d, 0)
+		return b
+	}
+	src := place(KChest, 0, 0, East)
+	for i := 0; i < 20; i++ {
+		src.Store = append(src.Store, Stack{Coal, 3}, Stack{IronPlate, 4}, Stack{CopperPlate, 3})
+	}
+	place(KBelt, 1, 0, East)
+	place(KBelt, 2, 0, East)
+	so := place(KSorter, 3, 0, East)
+	w.SetFilter(so.ID, Coal)
+	place(KBelt, 3, -1, North)
+	place(KChest, 3, -2, North)
+	place(KBelt, 3, 1, South)
+	place(KChest, 3, 2, South)
+	place(KBelt, 4, 0, East)
+	place(KBelt, 5, 0, East)
+	place(KSplitter, 6, 0, East)
+	place(KBelt, 7, 0, East)
+	place(KBelt, 8, 0, East)
+	place(KBelt, 6, -1, North)
+	for x := 6; x <= 8; x++ {
+		place(KBelt, x, -2, East)
+	}
+	place(KBelt, 9, -2, South)
+	place(KBelt, 9, -1, South)
+	place(KBelt, 6, 1, South)
+	for x := 6; x <= 8; x++ {
+		place(KBelt, x, 2, East)
+	}
+	place(KBelt, 9, 2, North)
+	place(KBelt, 9, 1, North)
+	place(KMerger, 9, 0, East)
+	place(KBelt, 10, 0, East)
+	place(KTunnel, 11, 0, East)
+	cross := place(KChest, 12, -4, South)
+	cross.Store = []Stack{{Stone, 150}}
+	for y := -3; y <= 3; y++ {
+		place(KBelt, 12, y, South)
+	}
+	place(KChest, 12, 4, South)
+	place(KTunnel, 14, 0, East)
+	place(KBelt, 15, 0, East)
+	place(KBelt, 16, 0, East)
+	place(KChest, 17, 0, East)
+}
