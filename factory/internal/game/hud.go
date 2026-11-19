@@ -62,23 +62,36 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 			k := k
 			sr := rect{x, r.y + 10*u, slot, slot}
 			unlocked := g.w.Unlocked(k)
+			active := g.tool != sim.KNone && g.tool.Base() == k
+			shown := k
+			if active {
+				shown = g.tool
+			}
 			bg := rgb(0xF7F4EE)
-			if g.tool == k {
+			if active {
 				bg = mix(colBody, colOK, 0.25)
 			}
 			fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), bg)
-			if g.tool == k {
+			if active {
 				strokeRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), float32(2*u), colOK)
 			}
+			if big := k.Big(); big != sim.KNone && g.w.Unlocked(big) {
+				label := "2×2"
+				lc := colInkSoft
+				if shown == big {
+					lc = colOK
+				}
+				drawText(dst, label, sr.x+sr.w-5*u, sr.y+2*u, 10*u, true, lc, alignRight)
+			}
 			if unlocked {
-				g.iconBuilding(dst, k, sr.x+11*u, sr.y+10*u, slot-22*u, sim.East)
+				g.iconBuilding(dst, shown, sr.x+11*u, sr.y+10*u, slot-22*u, sim.East)
 			} else {
 				g.iconBuilding(dst, k, sr.x+11*u, sr.y+10*u, slot-22*u, sim.East)
 				fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), rgba(0xF7F4EE, 0xC8))
 				lockGlyph(dst, float32(sr.x+sr.w/2), float32(sr.y+sr.h/2+2*u), float32(18*u), rgb(0x9AA0AC))
 			}
 			nc := colInkSoft
-			if unlocked && !g.w.CanAfford(k) {
+			if unlocked && !g.w.CanAfford(shown) {
 				nc = colBad
 			}
 			drawText(dst, toolKeyLabels[idx], sr.x+5*u, sr.y+2*u, 11*u, true, nc, alignLeft)
@@ -90,7 +103,7 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 			}
 			g.addButton(sr, func() { g.selectTool(k) })
 			if sr.has(g.mouseX, g.mouseY) {
-				hover = k
+				hover = shown
 			}
 			x += slot + gap
 			idx++
@@ -491,7 +504,7 @@ func (g *Game) drawWeapon(dst *ebiten.Image, b *sim.Building, cx, cy, w float32,
 	s := float32(g.cam.Scale)
 	a := float64(b.Aim)
 	ca, sa := float32(math.Cos(a)), float32(math.Sin(a))
-	switch b.Kind {
+	switch b.Kind.Base() {
 	case sim.KTurret:
 		fillCircle(dst, cx, cy, w*0.3, fade(rgb(0x4C566A)))
 		line(dst, cx, cy, cx+ca*w*0.48, cy+sa*w*0.48, max32(2, s*0.2), fade(rgb(0x3B4252)))
@@ -505,8 +518,8 @@ func (g *Game) drawWeapon(dst *ebiten.Image, b *sim.Building, cx, cy, w float32,
 	case sim.KCore:
 		line(dst, cx+ca*w*0.18, cy+sa*w*0.18, cx+ca*w*0.42, cy+sa*w*0.42, max32(2, s*0.14), fade(rgb(0xD8DEE9)))
 	}
-	if (b.Kind == sim.KTurret || b.Kind == sim.KFlamer) && s >= 12 {
-		cap := float32(sim.TurretAmmoCap)
+	if base := b.Kind.Base(); (base == sim.KTurret || base == sim.KFlamer) && s >= 12 {
+		cap := float32(sim.TurretAmmoCap * b.Size())
 		if b.Kind == sim.KFlamer {
 			cap = sim.FlamerFuelCap
 		}

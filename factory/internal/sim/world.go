@@ -223,8 +223,8 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 	if !w.Unlocked(k) {
 		return ErrLocked
 	}
-	if k == KMiner {
-		if it, _ := w.minerOre(p); it == ItemNone {
+	if k.Base() == KMiner {
+		if it, _ := w.minerOre(p, s); it == ItemNone {
 			return ErrNoOre
 		}
 	}
@@ -234,10 +234,10 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 	return nil
 }
 
-func (w *World) minerOre(p Pos) (Item, int) {
+func (w *World) minerOre(p Pos, size int) (Item, int) {
 	var cnt [ItemCount]int
-	for y := 0; y < 2; y++ {
-		for x := 0; x < 2; x++ {
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
 			cnt[w.OreAt(p.Add(x, y))]++
 		}
 	}
@@ -291,9 +291,9 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 		}
 	}
 	switch k {
-	case KMiner:
-		b.MinerItem, b.MinerTiles = w.minerOre(p)
-	case KFurnace:
+	case KMiner, KMinerBig:
+		b.MinerItem, b.MinerTiles = w.minerOre(p, b.Size())
+	case KFurnace, KFurnaceBig:
 		b.AutoRecipe = true
 	case KTunnel:
 		if sp.ExitSet {
@@ -305,7 +305,7 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 		b.Filter = sp.Filter
 	}
 	w.add(b)
-	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k && w.RecipeUnlocked(sp.Recipe) {
+	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k.Base() && w.RecipeUnlocked(sp.Recipe) {
 		w.SetRecipe(b.ID, sp.Recipe)
 	}
 	w.refreshAround(p)
@@ -378,7 +378,7 @@ func (w *World) Remove(id int32) error {
 			w.Stock[c.Item] += c.N
 		}
 	}
-	w.Stock[Ammo] += int(b.Ammo) / AmmoShots * boolInt(b.Kind == KTurret)
+	w.Stock[Ammo] += int(b.Ammo) / AmmoShots * boolInt(b.Kind.Base() == KTurret)
 	w.Stock[Coal] += int(b.Ammo) / CoalFuel * boolInt(b.Kind == KFlamer)
 	for _, it := range b.Belt {
 		w.Stock[it.Item]++
@@ -557,4 +557,13 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// MinerRate is a miner's output in items per second (before research bonuses).
+func MinerRate(b *Building) float64 {
+	n := b.Size() * b.Size()
+	if b.MinerTiles == 0 || n == 0 {
+		return 0
+	}
+	return SpeedOf(b.Kind) * float64(b.MinerTiles) / float64(n) / MinerTime
 }

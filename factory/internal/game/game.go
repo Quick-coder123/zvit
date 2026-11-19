@@ -287,6 +287,18 @@ func (g *Game) handleInput() {
 			}
 		}
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.tool != sim.KNone {
+		base := g.tool.Base()
+		switch big := base.Big(); {
+		case big == sim.KNone:
+		case g.tool == big:
+			g.tool = base
+		case g.w.Unlocked(big):
+			g.tool = big
+		default:
+			g.say("«%s» відкривається в дослідженнях (T)", sim.Builds[big].Name)
+		}
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyT) {
 		g.research = !g.research
 	}
@@ -420,7 +432,7 @@ func (g *Game) handleInput() {
 }
 
 func (g *Game) selectTool(k sim.Kind) {
-	if g.tool == k {
+	if g.tool != sim.KNone && g.tool.Base() == k {
 		g.tool = sim.KNone
 		return
 	}
@@ -620,7 +632,7 @@ func (g *Game) drawGhost(dst *ebiten.Image) {
 	p := g.footprint(g.tool)
 	ghost := &sim.Building{Kind: g.tool, Pos: p, Dir: g.dir, Recipe: -1}
 	switch g.tool {
-	case sim.KMiner:
+	case sim.KMiner, sim.KMinerBig:
 		ghost.MinerItem = g.w.OreAt(p)
 	case sim.KTunnel:
 		ghost.Exit = g.w.TunnelWouldExit(p, g.dir)

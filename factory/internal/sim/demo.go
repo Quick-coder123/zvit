@@ -27,28 +27,32 @@ func BuildDemo(w *World) {
 			x0, y0 = x0+d.DX(), y0+d.DY()
 		}
 	}
-	// iron: patch around (13,-5); miners output west onto a collector belt
-	for _, y := range []int{-8, -6, -4} {
+	// iron: a column of 1×1 miners outputs west onto a collector belt
+	for y := -8; y <= -4; y++ {
 		place(KMiner, 12, y, West)
 	}
 	line(11, -8, 11, -3)
 	line(11, -3, 8, -3)
-	place(KFurnace, 7, -4, West)
-	line(6, -3, 2, -3)
+	place(KFurnace, 8, -3, West)
+	line(7, -3, 2, -3)
 	line(2, -3, 2, 0)
 	place(KBelt, 2, 0, West)
-	// copper from (-13,-6) east into a furnace, then an assembler making wire
-	place(KMiner, -14, -7, East)
-	place(KMiner, -14, -5, East)
+	// upgraded 2×2 machines next to the small ones
+	place(KMinerBig, 14, -8, West)
+	place(KFurnaceBig, 5, -8, West)
+	place(KAssemblerBig, 2, -8, West)
+	// copper: miners -> furnace -> wire assembler -> core
+	for y := -7; y <= -5; y++ {
+		place(KMiner, -13, y, East)
+	}
 	line(-12, -7, -12, -2)
 	place(KBelt, -12, -2, East)
 	line(-11, -2, -9, -2)
-	f := place(KFurnace, -9, -3, East)
-	_ = f
-	line(-7, -2, -5, -2)
-	a := place(KAssembler, -5, -3, East)
+	place(KFurnace, -9, -2, East)
+	line(-8, -2, -5, -2)
+	a := place(KAssembler, -5, -2, East)
 	w.SetRecipe(a.ID, 6)
-	line(-3, -2, -2, -2)
+	line(-4, -2, -2, -2)
 	line(-2, -2, -2, 0)
 	place(KBelt, -2, 0, East)
 	place(KChest, 4, 4, East)
@@ -113,10 +117,11 @@ func BuildCombatDemo(w *World) {
 	for y := -9; y <= -1; y++ {
 		w.Place(KWall, Pos{17, y}, East, 0)
 	}
-	t1, _ := w.Place(KTurret, Pos{15, -8}, East, 0)
-	t2, _ := w.Place(KTurret, Pos{15, -3}, East, 0)
-	f, _ := w.Place(KFlamer, Pos{16, -5}, East, 0)
-	for _, b := range []*Building{t1, t2} {
+	t1, _ := w.Place(KTurret, Pos{16, -9}, East, 0)
+	t2, _ := w.Place(KTurretBig, Pos{15, -6}, East, 0)
+	t3, _ := w.Place(KTurret, Pos{16, -2}, East, 0)
+	f, _ := w.Place(KFlamer, Pos{16, -4}, East, 0)
+	for _, b := range []*Building{t1, t2, t3} {
 		if b != nil {
 			b.Ammo = 120
 		}

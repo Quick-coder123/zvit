@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 2
+const SaveVersion = 3
 
 type saveFile struct {
 	Version   int
@@ -89,7 +89,33 @@ func Decode(in io.Reader) (*World, error) {
 		w.NextWave = FirstWaveDelay
 		w.WaveAngle = w.rollWaveAngle()
 	}
+	if sf.Version < 3 {
+		// Machines used to be 2×2. Keep old layouts working by turning them
+		// into the 2×2 upgraded variants (and unlocking those).
+		for _, b := range w.Buildings {
+			if big := b.Kind.Big(); big != KNone {
+				b.Kind = big
+				for _, t := range Techs {
+					for _, k := range t.Unlocks {
+						if k == big {
+							w.Researched[t.ID] = true
+						}
+					}
+				}
+			}
+		}
+		for i := range w.Ruins {
+			if big := w.Ruins[i].Kind.Big(); big != KNone {
+				w.Ruins[i].Kind = big
+			}
+		}
+	}
 	w.initCaches()
+	for _, b := range w.Buildings {
+		if b.Kind.Base() == KMiner {
+			b.MinerItem, b.MinerTiles = w.minerOre(b.Pos, b.Size())
+		}
+	}
 	return w, nil
 }
 

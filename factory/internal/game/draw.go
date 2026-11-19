@@ -286,3 +286,6 @@ func textWidth(s string, size float64, bold bool) float64 {
 	w, _ := text.Measure(s, face(size, bold), size*1.35)
 	return w
 }
+
+// accentOf is the accent colour of a building kind (upgrades share the base colour).
+func accentOf(k sim.Kind) color.RGBA { return colAccent[k.Base()] }

@@ -18,8 +18,28 @@ const (
 	KWall
 	KFlamer
 	KTurret
+	KMinerBig
+	KFurnaceBig
+	KAssemblerBig
+	KTurretBig
 	KindCount
 )
+
+// bigOf maps a base machine to its larger upgraded variant.
+var bigOf = map[Kind]Kind{KMiner: KMinerBig, KFurnace: KFurnaceBig, KAssembler: KAssemblerBig, KTurret: KTurretBig}
+
+// Base returns the basic kind of an upgraded variant (or k itself).
+func (k Kind) Base() Kind {
+	for b, big := range bigOf {
+		if big == k {
+			return b
+		}
+	}
+	return k
+}
+
+// Big returns the upgraded variant of a base kind, or KNone.
+func (k Kind) Big() Kind { return bigOf[k] }
 
 type BuildDef struct {
 	Name string
@@ -27,6 +47,8 @@ type BuildDef struct {
 	Size int
 	Cost []Stack
 	HP   float32
+	// Speed multiplies work rate (miners, crafters); 0 means 1.
+	Speed float64
 	// Player can build it from the toolbar.
 	Buildable bool
 }
@@ -38,17 +60,17 @@ var Builds = [KindCount]BuildDef{
 		Cost: []Stack{{IronOre, 1}},
 	},
 	KMiner: {
-		Name: "Бур", Size: 2, Buildable: true, HP: 150,
-		Desc: "Ставиться на поклад і видобуває сировину. Випускає вперед.",
+		Name: "Бур", Size: 1, Buildable: true, HP: 150,
+		Desc: "Ставиться на клітинку покладу й видобуває сировину. Випускає вперед.",
 		Cost: []Stack{{IronOre, 15}},
 	},
 	KFurnace: {
-		Name: "Піч", Size: 2, Buildable: true, HP: 200,
+		Name: "Піч", Size: 1, Buildable: true, HP: 200,
 		Desc: "Переплавляє руду. Рецепт обирає сама за першим предметом.",
 		Cost: []Stack{{Stone, 12}},
 	},
 	KAssembler: {
-		Name: "Збирач", Size: 2, Buildable: true, HP: 200,
+		Name: "Збирач", Size: 1, Buildable: true, HP: 200,
 		Desc: "Збирає деталі. Клацни по ньому, щоб обрати рецепт.",
 		Cost: []Stack{{IronPlate, 15}, {CopperPlate, 10}},
 	},
@@ -92,11 +114,42 @@ var Builds = [KindCount]BuildDef{
 		Cost: []Stack{{IronPlate, 15}, {Brick, 10}},
 	},
 	KTurret: {
-		Name: "Кулеметна турель", Size: 2, Buildable: true, HP: 350,
+		Name: "Кулеметна турель", Size: 1, Buildable: true, HP: 350,
 		Desc: "Стріляє далеко й точно. Потрібні набої (збирач: залізо + мідь) — підвези конвеєром.",
 		Cost: []Stack{{IronPlate, 20}, {Gear, 10}, {CopperPlate, 6}},
 	},
+	KMinerBig: {
+		Name: "Великий бур", Size: 2, Buildable: true, HP: 400, Speed: 5,
+		Desc: "Покращений бур 2×2: на повному покладі видобуває як п'ять звичайних, а вихід один.",
+		Cost: []Stack{{IronPlate, 30}, {Steel, 10}, {Gear, 10}},
+	},
+	KFurnaceBig: {
+		Name: "Плавильня", Size: 2, Buildable: true, HP: 500, Speed: 3,
+		Desc: "Покращена піч 2×2: плавить утричі швидше.",
+		Cost: []Stack{{Brick, 30}, {Steel, 10}},
+	},
+	KAssemblerBig: {
+		Name: "Складальний цех", Size: 2, Buildable: true, HP: 500, Speed: 3,
+		Desc: "Покращений збирач 2×2: працює втричі швидше. Клацни, щоб обрати рецепт.",
+		Cost: []Stack{{Steel, 15}, {Gear, 15}, {Wire, 20}},
+	},
+	KTurretBig: {
+		Name: "Важка турель", Size: 2, Buildable: true, HP: 800,
+		Desc: "Покращена турель 2×2: б'є вдвічі з половиною сильніше й на 4 клітинки далі. Потрібні набої.",
+		Cost: []Stack{{Steel, 25}, {Gear, 20}, {CopperPlate, 20}},
+	},
 }
+
+// SpeedOf returns the work-rate multiplier of a kind.
+func SpeedOf(k Kind) float64 {
+	if s := Builds[k].Speed; s > 0 {
+		return s
+	}
+	return 1
+}
+
+// IsCrafter reports kinds that run recipes.
+func (k Kind) IsCrafter() bool { b := k.Base(); return b == KFurnace || b == KAssembler }
 
 // Blocks reports whether enemies collide with (and attack) this kind.
 func (k Kind) Blocks() bool { return k != KBelt && k != KNone }
@@ -126,7 +179,7 @@ var Recipes = []Recipe{
 func RecipesFor(k Kind) []int {
 	var out []int
 	for i, r := range Recipes {
-		if r.Machine == k {
+		if r.Machine == k.Base() {
 			out = append(out, i)
 		}
 	}

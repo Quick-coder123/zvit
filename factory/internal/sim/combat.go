@@ -359,7 +359,11 @@ func (w *World) shoot(b *Building, e *Enemy, dmg float32) {
 func (w *World) stepTurret(b *Building) {
 	b.Cool -= DT
 	x, y := b.center()
-	e := w.nearestEnemy(x, y, turretRange+w.RangeBonus())
+	rng, dmg := turretRange, float32(turretDamage)
+	if b.Kind == KTurretBig {
+		rng, dmg = turretRange+4, turretDamage*2.5
+	}
+	e := w.nearestEnemy(x, y, rng+w.RangeBonus())
 	if e == nil {
 		return
 	}
@@ -367,7 +371,7 @@ func (w *World) stepTurret(b *Building) {
 	if b.Cool > 0 || b.Ammo <= 0 {
 		return
 	}
-	w.shoot(b, e, turretDamage*w.DamageMul())
+	w.shoot(b, e, dmg*w.DamageMul())
 	b.Ammo--
 	b.Cool = turretCool
 }

@@ -1,6 +1,11 @@
 package sim
 
-import "testing"
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/gob"
+	"testing"
+)
 
 func TestStarterEconomy(t *testing.T) {
 	w := NewWorld(5)
@@ -151,5 +156,80 @@ func TestSaveKeepsCombatState(t *testing.T) {
 	w2 := roundTrip(t, w)
 	if !w2.Researched["walls"] || len(w2.Enemies) != 1 || w2.Wave != 3 || len(w2.Ruins) != 1 || w2.Free[KBelt] != 10 {
 		t.Fatal("combat state lost")
+	}
+}
+
+func TestMachinesAreOneTile(t *testing.T) {
+	for _, k := range []Kind{KMiner, KFurnace, KAssembler, KTurret} {
+		if Builds[k].Size != 1 {
+			t.Fatalf("%s should be 1×1", Builds[k].Name)
+		}
+		if big := k.Big(); Builds[big].Size != 2 || big.Base() != k {
+			t.Fatalf("%s needs a 2×2 upgrade", Builds[k].Name)
+		}
+	}
+	if Builds[KCore].Size != 3 {
+		t.Fatal("core stays 3×3")
+	}
+}
+
+func TestBigVariants(t *testing.T) {
+	w := NewWorld(42)
+	w.Peaceful = true
+	for i := range w.Stock {
+		w.Stock[i] = 1000
+	}
+	if err := w.CheckPlace(KMinerBig, Pos{12, -6}, West); err != ErrLocked {
+		t.Fatalf("big miner should need research: %v", err)
+	}
+	w.UnlockAll()
+	small, err := w.Place(KMiner, Pos{14, -5}, West, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big, err := w.Place(KMinerBig, Pos{12, -7}, West, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if MinerRate(big) < 4.9*MinerRate(small) && big.MinerTiles == 4 {
+		t.Fatalf("big miner rate %.2f vs small %.2f", MinerRate(big), MinerRate(small))
+	}
+	// big assembler shares recipes with the small one and runs 3× faster
+	a, _ := w.Place(KAssemblerBig, Pos{0, 6}, East, 0)
+	w.SetRecipe(a.ID, 5) // gears
+	if a.Recipe != 5 || len(RecipesFor(KAssemblerBig)) != len(RecipesFor(KAssembler)) {
+		t.Fatal("big assembler recipes")
+	}
+	a.InBuf[0].N = 2
+	run(w, 1.0/3+0.05)
+	if a.OutN != 1 {
+		t.Fatalf("big assembler should finish a 1s gear in 1/3s, out=%d", a.OutN)
+	}
+}
+
+func TestOldSaveKeeps2x2Machines(t *testing.T) {
+	w := NewWorld(42)
+	w.UnlockAll()
+	for i := range w.Stock {
+		w.Stock[i] = 1000
+	}
+	f, _ := w.Place(KFurnaceBig, Pos{5, 5}, East, 0)
+	// pretend it was saved by an older version as a plain 2×2 furnace
+	f.Kind = KFurnace
+	var buf bytes.Buffer
+	sf := saveFile{Version: 2, Seed: w.Seed, NextID: w.NextID, Stock: w.Stock[:], Researched: map[string]bool{}}
+	for _, id := range w.Order() {
+		sf.Buildings = append(sf.Buildings, w.Buildings[id])
+	}
+	zw := gzip.NewWriter(&buf)
+	gob.NewEncoder(zw).Encode(&sf)
+	zw.Close()
+	w2, err := Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := w2.At(Pos{6, 6})
+	if b == nil || b.Kind != KFurnaceBig || !w2.Researched["bigfurnace"] {
+		t.Fatalf("old 2×2 furnace not migrated: %+v", b)
 	}
 }

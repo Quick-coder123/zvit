@@ -92,7 +92,7 @@ func TestSmeltingChain(t *testing.T) {
 	found := false
 	for y := -20; y < 20 && !found; y++ {
 		for x := -25; x < 25 && !found; x++ {
-			if it, n := w.minerOre(Pos{x, y}); it == IronOre && n == 4 && x > 2 {
+			if it, n := w.minerOre(Pos{x, y}, 1); it == IronOre && n == 1 && x > 5 {
 				spot, found = Pos{x, y}, true
 			}
 		}
@@ -106,7 +106,7 @@ func TestSmeltingChain(t *testing.T) {
 	x := spot.X - 1
 	y := spot.Y
 	fur := Pos{x - 2, y}
-	for cx := x; cx > fur.X+1; cx-- {
+	for cx := x; cx > fur.X; cx-- {
 		mustPlace(t, w, KBelt, Pos{cx, y}, West)
 	}
 	f := mustPlace(t, w, KFurnace, fur, West)

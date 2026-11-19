@@ -18,9 +18,9 @@ func (w *World) Update(active ActiveFunc) {
 		switch b.Kind {
 		case KBelt:
 			w.stepBelt(b)
-		case KMiner:
+		case KMiner, KMinerBig:
 			w.stepMiner(b)
-		case KFurnace, KAssembler:
+		case KFurnace, KAssembler, KFurnaceBig, KAssemblerBig:
 			w.stepCrafter(b)
 		case KChest:
 			w.stepChest(b)
@@ -32,7 +32,7 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepMerger(b)
 		case KSorter:
 			w.stepSorter(b)
-		case KTurret:
+		case KTurret, KTurretBig:
 			w.stepTurret(b)
 		case KFlamer:
 			w.stepFlamer(b)
@@ -143,8 +143,8 @@ func inCap(need int) int { return need*2 + 2 }
 // accept offers an item arriving with travel direction d to a non-belt building.
 func (w *World) accept(b *Building, it Item, d Dir) bool {
 	switch b.Kind {
-	case KTurret:
-		if it != Ammo || b.Ammo > TurretAmmoCap-AmmoShots {
+	case KTurret, KTurretBig:
+		if it != Ammo || b.Ammo > TurretAmmoCap*int32(b.Size())-AmmoShots {
 			return false
 		}
 		b.Ammo += AmmoShots
@@ -198,7 +198,7 @@ func (w *World) accept(b *Building, it Item, d Dir) bool {
 			b.Store = append(b.Store, Stack{it, 1})
 		}
 		return true
-	case KFurnace, KAssembler:
+	case KFurnace, KAssembler, KFurnaceBig, KAssemblerBig:
 		if b.Recipe < 0 || (b.AutoRecipe && b.idle() && !recipeUses(b.Recipe, it)) {
 			r := w.autoRecipe(b.Kind, it)
 			if r < 0 {
@@ -256,7 +256,7 @@ func (w *World) stepMiner(b *Building) {
 	}
 	if b.OutN < OutCap {
 		b.Working = true
-		b.Progress += float32(DT * w.MineMul() / (MinerTime * 4 / float64(b.MinerTiles)))
+		b.Progress += float32(DT * w.MineMul() * MinerRate(b))
 		if b.Progress >= 1 {
 			b.Progress -= 1
 			b.OutItem = b.MinerItem
@@ -288,7 +288,7 @@ func (w *World) stepCrafter(b *Building) {
 			}
 		}
 		if b.Working {
-			b.Progress += float32(DT * w.CraftMul() / r.Time)
+			b.Progress += float32(DT * w.CraftMul() * SpeedOf(b.Kind) / r.Time)
 			if b.Progress >= 1 {
 				b.Working = false
 				b.Progress = 0

@@ -191,7 +191,7 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	sz := float32(b.Size())
 	x, y := cam.ToScreen(float64(b.Pos.X), float64(b.Pos.Y))
 	w := s * sz
-	acc := colAccent[b.Kind]
+	acc := accentOf(b.Kind)
 	fade := func(c color.RGBA) color.RGBA {
 		if alpha >= 1 {
 			return c
@@ -238,7 +238,7 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	strokeRoundRect(dst, bx, by, bw, bw, s*0.18, max32(1, s*0.05), fade(mix(acc, colInk, 0.35)))
 	cx, cy := x+w/2, y+w/2
 
-	switch b.Kind {
+	switch b.Kind.Base() {
 	case sim.KMiner:
 		fillCircle(dst, cx, cy, w*0.27, fade(mix(colBody, acc, 0.18)))
 		rot := 0.0
@@ -251,7 +251,7 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 			line(dst, cx, cy, ex, ey, max32(1.5, s*0.12), fade(acc))
 		}
 		fillCircle(dst, cx, cy, w*0.08, fade(colInk))
-		if b.MinerItem != sim.ItemNone && s >= 12 {
+		if b.MinerItem != sim.ItemNone && s >= 12 && b.Size() > 1 {
 			drawItem(dst, b.MinerItem, bx+bw*0.14, by+bw*0.14, s*0.32)
 		}
 	case sim.KFurnace:
@@ -295,17 +295,21 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 		}
 	}
 
-	if b.Kind == sim.KTurret || b.Kind == sim.KFlamer || b.Kind == sim.KCore {
+	if base := b.Kind.Base(); base == sim.KTurret || base == sim.KFlamer || base == sim.KCore {
 		g.drawWeapon(dst, b, cx, cy, w, fade)
 	}
 
 	// output product badge for crafters
-	if (b.Kind == sim.KFurnace || b.Kind == sim.KAssembler) && b.Recipe >= 0 && s >= 12 {
-		drawItem(dst, sim.Recipes[b.Recipe].Out.Item, bx+bw*0.16, by+bw*0.16, s*0.34)
+	if b.Kind.IsCrafter() && b.Recipe >= 0 && s >= 12 {
+		if b.Size() == 1 {
+			drawItem(dst, sim.Recipes[b.Recipe].Out.Item, bx+bw*0.14, by+bw*0.14, s*0.24)
+		} else {
+			drawItem(dst, sim.Recipes[b.Recipe].Out.Item, bx+bw*0.16, by+bw*0.16, s*0.34)
+		}
 	}
 
 	// output arrow on the front face
-	if b.Kind != sim.KCore && b.Kind != sim.KTurret && b.Kind != sim.KFlamer {
+	if base := b.Kind.Base(); base != sim.KCore && base != sim.KTurret && base != sim.KFlamer {
 		a := dirAngle(b.Dir)
 		ax := cx + float32(b.Dir.DX())*(bw/2-s*0.02)
 		ay := cy + float32(b.Dir.DY())*(bw/2-s*0.02)

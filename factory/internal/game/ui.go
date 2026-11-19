@@ -179,6 +179,11 @@ func (g *Game) buildTooltip(dst *ebiten.Image, k sim.Kind) {
 	case !g.w.CanAfford(k):
 		body += "\nБракує ресурсів у ядрі"
 	}
+	if big := k.Big(); big != sim.KNone && g.w.Unlocked(big) {
+		body += "\nTab — перемкнути на «" + sim.Builds[big].Name + "» (2×2)"
+	} else if base := k.Base(); base != k {
+		body += "\nTab — назад до «" + sim.Builds[base].Name + "» (1×1)"
+	}
 	g.tooltip(dst, def.Name, body)
 }
 
@@ -245,10 +250,10 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			return 22 * u
 		})
 	}
-	switch b.Kind {
+	switch b.Kind.Base() {
 	case sim.KTurret:
 		add(func(y float64) float64 {
-			msg := fmt.Sprintf("Набоїв: %d пострілів (макс. %d)", b.Ammo, sim.TurretAmmoCap)
+			msg := fmt.Sprintf("Набоїв: %d пострілів (макс. %d)", b.Ammo, sim.TurretAmmoCap*b.Size())
 			c := colInk
 			if b.Ammo == 0 {
 				msg, c = "Без набоїв! Підвези «Набої» конвеєром.", colBad
@@ -273,7 +278,7 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 				return 24 * u
 			}
 			drawItem(dst, b.MinerItem, float32(r.x+pad+9*u), float32(y+9*u), float32(18*u))
-			rate := 60 / (sim.MinerTime * 4 / float64(b.MinerTiles))
+			rate := 60 * sim.MinerRate(b) * g.w.MineMul()
 			drawText(dst, fmt.Sprintf("%s · %.0f/хв", sim.Items[b.MinerItem].Name, rate), r.x+pad+26*u, y, 13*u, false, colInk, alignLeft)
 			return 28 * u
 		})
@@ -306,7 +311,7 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 				return 34 * u
 			})
 		}
-		if b.Kind == sim.KFurnace {
+		if b.Kind.Base() == sim.KFurnace {
 			add(func(y float64) float64 {
 				msg := "Обирається сама за першою рудою"
 				if !b.AutoRecipe {
@@ -335,7 +340,7 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			py := y + 28*u
 			fillRoundRect(dst, float32(r.x+pad), float32(py), float32(W-2*pad), float32(6*u), float32(3*u), rgb(0xE6E0D4))
 			if b.Progress > 0 {
-				fillRoundRect(dst, float32(r.x+pad), float32(py), float32((W-2*pad)*float64(b.Progress)), float32(6*u), float32(3*u), colAccent[b.Kind])
+				fillRoundRect(dst, float32(r.x+pad), float32(py), float32((W-2*pad)*float64(b.Progress)), float32(6*u), float32(3*u), accentOf(b.Kind))
 			}
 			return 42 * u
 		})
@@ -566,6 +571,8 @@ const helpText = `Будуй фабрику, досліджуй нове й за
 5. Зруйноване лишає червоний слід — кнопка «Відбудувати» (B) поставить усе назад.
 
 Логістика: тунель (2), розгалужувач (3), об'єднувач (4), сортер (5).
+Покращені 2×2 версії бура, печі, збирача й турелі відкриваються в дослідженнях —
+обери інструмент і натисни Tab, щоб перемкнутися на велику версію.
 
 Керування
 ЛКМ — поставити (тягни конвеєр мишею) · ПКМ — знести (можна тягнути)
