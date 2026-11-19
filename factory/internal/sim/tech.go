@@ -20,7 +20,7 @@ var Techs = []Tech{
 		Cost: []Stack{{Stone, 30}}, Unlocks: []Kind{KWall}},
 	{ID: "station", Name: "Вантажна справа", Desc: "Вантажна станція: три носії, що лише переносять вантажі — швидше й більше.",
 		Cost: []Stack{{IronOre, 30}, {Stone, 30}}, Unlocks: []Kind{KStation}},
-	{ID: "chest", Name: "Стелажі", Desc: "Склади вміщують удвічі більше: 400 предметів.",
+	{ID: "chest", Name: "Стелажі", Desc: "Ратуша й склади вміщують удвічі більше: 600 і 400 предметів.",
 		Cost: []Stack{{IronPlate, 40}, {Stone, 40}}, Req: []string{"furnace"}},
 	{ID: "flamer", Name: "Вогнемет", Desc: "Турель ближнього бою. Палить вугілля, б'є по площі.",
 		Cost: []Stack{{IronPlate, 30}, {Brick, 15}, {Coal, 20}}, Req: []string{"furnace"}, Unlocks: []Kind{KFlamer}},

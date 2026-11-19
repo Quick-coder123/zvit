@@ -135,17 +135,24 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 		}
 	}
 	rows := max((len(items)+1)/2, 1)
-	r := rect{14 * u, 14 * u, 250 * u, (44 + float64(rows)*26 + 108) * u}
+	r := rect{14 * u, 14 * u, 250 * u, (50 + float64(rows)*26 + 108) * u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
 	g.drawTown(dst, r.x+14*u, r.y+10*u)
 	r.y += 108 * u
 	line(dst, float32(r.x+14*u), float32(r.y), float32(r.x+r.w-14*u), float32(r.y), float32(u), colPanelLine)
 	drawText(dst, "Запаси", r.x+14*u, r.y+10*u, 14*u, true, colInk, alignLeft)
+	used, total := g.w.StorageTotals()
+	uc := colInkSoft
+	if used >= total*9/10 {
+		uc = colBad
+	}
+	drawText(dst, fmt.Sprintf("місце %d / %d", used, total), r.x+r.w-14*u, r.y+12*u, 11.5*u, true, uc, alignRight)
+	g.capacityBar(dst, r.x+14*u, r.y+32*u, r.w-28*u, used, total)
 	for i, it := range items {
 		col, row := i%2, i/2
 		x := r.x + 14*u + float64(col)*118*u
-		y := r.y + 40*u + float64(row)*26*u
+		y := r.y + 46*u + float64(row)*26*u
 		drawItem(dst, it, float32(x+9*u), float32(y+8*u), float32(16*u))
 		drawText(dst, fmtCount(g.stock[it]), x+24*u, y, 13*u, false, colInk, alignLeft)
 		if (rect{x, y - 4*u, 110 * u, 24 * u}).has(g.mouseX, g.mouseY) {
@@ -153,8 +160,26 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 		}
 	}
 	if len(items) == 0 {
-		drawText(dst, "порожньо", r.x+14*u, r.y+40*u, 13*u, false, colInkSoft, alignLeft)
+		drawText(dst, "порожньо", r.x+14*u, r.y+46*u, 13*u, false, colInkSoft, alignLeft)
 	}
+}
+
+// capacityBar draws a thin fill bar for storage space.
+func (g *Game) capacityBar(dst *ebiten.Image, x, y, w float64, used, cap int) {
+	u := g.ui
+	f := 0.0
+	if cap > 0 {
+		f = math.Min(1, float64(used)/float64(cap))
+	}
+	c := colOK
+	switch {
+	case f >= 1:
+		c = colBad
+	case f >= 0.85:
+		c = rgb(0xF2A65A)
+	}
+	fillRoundRect(dst, float32(x), float32(y), float32(w), float32(5*u), float32(2.5*u), rgb(0xE6E0D4))
+	fillRoundRect(dst, float32(x), float32(y), float32(w*f), float32(5*u), float32(2.5*u), c)
 }
 
 // drawTown shows population, jobs and food.
@@ -173,7 +198,7 @@ func (g *Game) drawTown(dst *ebiten.Image, x, y float64) {
 	drawItem(dst, sim.Food, float32(x+8*u), float32(y+77*u), float32(16*u))
 	mins := w.FoodMinutes()
 	fc := colInk
-	msg := fmt.Sprintf("їжа %d · вистачить на %s", w.TotalStock(sim.Food), fmtMinutes(mins))
+	msg := fmt.Sprintf("їжа %d · вистачить на %s", w.FoodAvailable(), fmtMinutes(mins))
 	switch {
 	case starving > 0:
 		fc, msg = colBad, fmt.Sprintf("Голодують: %d! Потрібні ферми", starving)
@@ -443,15 +468,23 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			}
 			return 42 * u
 		})
-	case sim.KChest:
+	case sim.KChest, sim.KCore:
 		add(func(y float64) float64 {
-			drawText(dst, fmt.Sprintf("Заповнено: %d / %d", b.StoreCount(), g.w.ChestCapacity()), r.x+pad, y, 13*u, false, colInk, alignLeft)
-			return 22 * u
+			used, cap := g.w.StorageUsed(b), g.w.StorageCap(b)
+			c := colInk
+			if used >= cap {
+				c = colBad
+			}
+			drawText(dst, fmt.Sprintf("Заповнено: %d / %d", used, cap), r.x+pad, y, 13*u, true, c, alignLeft)
+			g.capacityBar(dst, r.x+pad, y+22*u, W-2*pad, used, cap)
+			return 36 * u
 		})
+	}
+	switch b.Kind {
 	case sim.KCore:
 		add(func(y float64) float64 {
-			drawText(dst, "Головний склад: сюди жителі зносять\nусе вироблене, звідси беруть матеріали.", r.x+pad, y, 12.5*u, false, colInk, alignLeft)
-			return 40 * u
+			drawText(dst, "Сюди й на склади жителі зносять\nусе вироблене. Місце обмежене —\nставте склади біля виробництва.", r.x+pad, y, 12.5*u, false, colInk, alignLeft)
+			return 58 * u
 		})
 	}
 
@@ -624,8 +657,10 @@ const helpText = `Розбудуй поселення, нагодуй жител
    Одна ферма годує ~11 жителів.
 3. Будинки дають житло; де живуть двоє й є їжа, народжуються нові жителі.
 4. Будівлі ставляться як будмайданчики: жителі зносять матеріали й будують.
-5. Склад (3) біля виробництва скорочує шлях. Вантажна станція (4) дає трьох
-   носіїв, які лише переносять вантажі — швидше й більше, у радіусі 12 клітинок.
+5. Місце для запасів обмежене: ратуша — 300, склад (3) — 200 предметів.
+   Заповнились склади — виробництво стає. Склад біля шахти ще й скорочує шлях.
+   Вантажна станція (4) дає трьох носіїв, які лише переносять вантажі —
+   швидше й більше, у радіусі 12 клітинок.
 6. Дослідження (T) відкривають піч, збирач, зброю й покращення.
 7. Хвилі ворогів: стіни (Z), вогнемети (X) і турелі (C). Турелям потрібні
    працівник і боєприпаси — жителі принесуть їх зі складу.

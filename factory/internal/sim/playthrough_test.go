@@ -73,13 +73,17 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 		case step == 6 && w.Research("station") == nil:
 			step++
 		}
+		if used, total := w.StorageTotals(); sec%20 == 0 && used*10 >= total*8 {
+			try(KChest, freeSpot(w, Pos{-6 + sec%7, -4}))
+		}
 		if sec%30 == 29 && len(w.Ruins) > 0 && len(w.Enemies) == 0 {
 			w.RebuildRuins()
 		}
 		if sec%60 == 59 {
 			free, work, car, starving := w.RoleCounts()
-			t.Logf("%2d min: pop %2d/%2d free %d work %d carriers %d starving %d food %3d ore %3d stone %3d plates %3d wave %d deaths %d step %d",
-				(sec+1)/60, w.Population(), w.Housing(), free, work, car, starving, w.TotalStock(Food),
+			used, total := w.StorageTotals()
+			t.Logf("%2d min: pop %2d/%2d free %d work %d carriers %d starving %d storage %3d/%3d food %3d ore %3d stone %3d plates %3d wave %d deaths %d step %d",
+				(sec+1)/60, w.Population(), w.Housing(), free, work, car, starving, used, total, w.TotalStock(Food),
 				w.TotalStock(IronOre), w.TotalStock(Stone), w.TotalStock(IronPlate), w.Wave, w.Deaths, step)
 		}
 	}

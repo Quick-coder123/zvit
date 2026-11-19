@@ -179,7 +179,7 @@ func (w *World) stepSettler(s *Settler) {
 	// eating
 	s.MealIn -= DT
 	if s.MealIn <= 0 {
-		if w.TakeStock(Food, 1) {
+		if w.eat() {
 			s.MealIn = MealInterval
 			s.Starving = 0
 		} else {
@@ -281,11 +281,17 @@ func (w *World) stepHaul(s *Settler) {
 	s.Task = TaskNone
 }
 
-// redirectToStorage sends whatever a settler carries to the nearest storage.
+// redirectToStorage sends whatever a settler carries to the nearest storage
+// with room. When every storage is full the settler keeps the load and waits.
 func (w *World) redirectToStorage(s *Settler) {
-	st := w.nearestStorage(s.X, s.Y, s.Carry.N, 0)
-	if st == nil || s.Carry.N == 0 {
-		s.Carry, s.Task = Stack{}, TaskNone
+	if s.Carry.N == 0 {
+		s.Task = TaskNone
+		return
+	}
+	st := w.nearestStorage(s.X, s.Y, 1, 0)
+	if st == nil {
+		s.Task = TaskNone // holding the load; allocate() retries
+		w.storageFull()
 		return
 	}
 	s.Task, s.Phase, s.To, s.Item, s.N = TaskHaul, 1, st.ID, s.Carry.Item, s.Carry.N
@@ -326,10 +332,11 @@ func (w *World) deliver(b *Building, st Stack) int {
 		}
 		return n
 	case b.Kind == KCore:
-		w.Stock[st.Item] += n
-		return 0
+		d := max(0, min(n, w.StorageCap(b)-w.StorageUsed(b)))
+		w.Stock[st.Item] += d
+		return n - d
 	case b.Kind == KChest:
-		d := min(n, w.ChestCapacity()-b.StoreCount())
+		d := max(0, min(n, w.StorageCap(b)-b.StoreCount()))
 		if d > 0 {
 			b.storeAdd(st.Item, d)
 		}
@@ -353,10 +360,7 @@ func (w *World) deliver(b *Building, st Stack) int {
 
 // storageFree is how many more items a storage building accepts.
 func (w *World) storageFree(b *Building) int {
-	if b.Kind == KCore {
-		return math.MaxInt32
-	}
-	n := w.ChestCapacity() - b.StoreCount()
+	n := w.StorageCap(b) - w.StorageUsed(b)
 	for _, p := range b.pend {
 		n -= p
 	}
@@ -538,6 +542,13 @@ func (w *World) allocate() {
 				residents[id]++
 				break
 			}
+		}
+	}
+
+	// settlers stuck holding goods try to find room again
+	for _, s := range w.Settlers {
+		if s.Task == TaskNone && s.Carry.N > 0 {
+			w.redirectToStorage(s)
 		}
 	}
 
@@ -774,6 +785,7 @@ func (w *World) allocate() {
 		x, y := b.center()
 		st := w.nearestStorage(x, y, 1, 0)
 		if st == nil {
+			w.storageFull()
 			continue
 		}
 		s := pickHauler(b, st)
@@ -795,12 +807,38 @@ func (w *World) Residents(id int32) int {
 	return n
 }
 
-// FoodMinutes estimates how long the stored food lasts.
+// FoodAvailable counts food in storage and waiting at farms.
+func (w *World) FoodAvailable() int {
+	n := w.TotalStock(Food)
+	for _, b := range w.Buildings {
+		if b.Kind == KFarm && b.OutItem == Food {
+			n += b.OutN
+		}
+	}
+	return n
+}
+
+// eat takes one food from storage or, when storage has none, straight from
+// a farm's store, so full warehouses never starve the town.
+func (w *World) eat() bool {
+	if w.TakeStock(Food, 1) {
+		return true
+	}
+	for _, id := range w.Order() {
+		if b := w.Buildings[id]; b.Kind == KFarm && b.OutItem == Food && b.OutN > b.res[Food] {
+			b.OutN--
+			return true
+		}
+	}
+	return false
+}
+
+// FoodMinutes estimates how long the available food lasts.
 func (w *World) FoodMinutes() float64 {
 	if len(w.Settlers) == 0 {
 		return math.Inf(1)
 	}
-	return float64(w.TotalStock(Food)) * MealInterval / float64(len(w.Settlers)) / 60
+	return float64(w.FoodAvailable()) * MealInterval / float64(len(w.Settlers)) / 60
 }
 
 // Counts of settlers by role for the UI.
@@ -819,4 +857,13 @@ func (w *World) RoleCounts() (free, workers, carriers, starving int) {
 		}
 	}
 	return
+}
+
+// storageFull warns the player (at most once a minute) that goods have
+// nowhere to go.
+func (w *World) storageFull() {
+	if w.Tick >= w.fullWarned {
+		w.fullWarned = w.Tick + 60*TPS
+		w.notice("Склади заповнені! Збудуй ще склади (3) — інакше виробництво стане.")
+	}
 }

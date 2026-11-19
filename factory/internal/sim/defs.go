@@ -74,7 +74,7 @@ var Builds = [KindCount]BuildDef{
 
 	KCore: {
 		Name: "Ратуша", Size: 3, HP: 2500, Housing: 4,
-		Desc: "Серце поселення: головний склад без обмежень, житло на 4 особи й слабка гармата.",
+		Desc: "Серце поселення: склад на 300 предметів, житло на 4 особи й слабка гармата.",
 	},
 	KHouse: {
 		Name: "Будинок", Size: 1, Buildable: true, HP: 150, Housing: 3,
@@ -207,6 +207,7 @@ const (
 	TPS       = 60
 	DT        = 1.0 / TPS
 	ChestCap  = 200
+	CoreCap   = 300
 	MinerTime = 4.0 // seconds per item for a 1×1 miner on ore
 	FarmTime  = 8.0 // seconds per food
 	OutCap    = 8

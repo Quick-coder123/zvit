@@ -4,7 +4,7 @@ package sim
 // used for debug screenshots and as a smoke test of the full economy.
 func BuildDemo(w *World) {
 	for i := range w.Stock {
-		w.Stock[i] += 300
+		w.Stock[i] += 15
 	}
 	place := func(k Kind, x, y int) *Building {
 		b, _ := w.Place(k, Pos{x, y}, East, 0)
@@ -18,6 +18,8 @@ func BuildDemo(w *World) {
 	}
 	place(KMinerBig, 14, -8)
 	place(KChest, 10, -6)
+	place(KChest, -10, -4)
+	place(KChest, 3, -1)
 	place(KStation, 9, -4)
 	place(KFurnace, 7, -3)
 	place(KFurnace, 7, -5)

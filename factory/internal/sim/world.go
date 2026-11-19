@@ -137,10 +137,11 @@ type World struct {
 	Shots   []Shot   // transient weapon effects (not saved)
 	Notices []string // messages for the UI (not saved)
 
-	grid   map[Pos]int32
-	chunks map[Pos]*[chunkSize * chunkSize]Item
-	order  []int32
-	dirty  bool
+	grid       map[Pos]int32
+	chunks     map[Pos]*[chunkSize * chunkSize]Item
+	fullWarned uint64
+	order      []int32
+	dirty      bool
 }
 
 // NewWorld creates a fresh settlement: a town hall, four settlers and a few
@@ -260,12 +261,42 @@ func (w *World) affordable(cost []Stack) bool {
 	return true
 }
 
-// ChestCapacity of a storehouse, including research.
-func (w *World) ChestCapacity() int {
-	if w.Researched["chest"] {
-		return ChestCap * 2
+// StorageCap is how many items a storage building holds, including research.
+func (w *World) StorageCap(b *Building) int {
+	c := 0
+	switch b.Kind {
+	case KCore:
+		c = CoreCap
+	case KChest:
+		c = ChestCap
 	}
-	return ChestCap
+	if w.Researched["chest"] {
+		c *= 2
+	}
+	return c
+}
+
+// StorageUsed is how many items a storage building currently holds.
+func (w *World) StorageUsed(b *Building) int {
+	if b.Kind == KCore {
+		n := 0
+		for _, v := range w.Stock {
+			n += v
+		}
+		return n
+	}
+	return b.StoreCount()
+}
+
+// StorageTotals sums used and total space over all finished storages.
+func (w *World) StorageTotals() (used, total int) {
+	for _, b := range w.Buildings {
+		if b.Kind.IsStorage() && !b.Site {
+			used += w.StorageUsed(b)
+			total += w.StorageCap(b)
+		}
+	}
+	return
 }
 
 // --- placing and removing --------------------------------------------------------

@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func emptyWorld(n int) *World {
 	w.UnlockAll()
 	c := w.add(&Building{Kind: KCore, Pos: Pos{-1, -1}, Recipe: -1})
 	for i := range w.Stock {
-		w.Stock[i] = 1000
+		w.Stock[i] = 15 // stays well within the town hall's capacity
 	}
 	for i := 0; i < n; i++ {
 		w.spawnSettler(c)
@@ -299,5 +300,42 @@ func TestBackupRotation(t *testing.T) {
 	left, _ := filepath.Glob(path + ".*.bak")
 	if len(left) != 2 {
 		t.Fatalf("kept %d backups", len(left))
+	}
+}
+
+func TestStorageIsLimited(t *testing.T) {
+	w := emptyWorld(3)
+	w.Researched["chest"] = false
+	core := w.Core()
+	if cap := w.StorageCap(core); cap != CoreCap {
+		t.Fatalf("town hall capacity %d", cap)
+	}
+	// fill the town hall almost to the brim
+	w.Stock[Stone] += CoreCap - w.StorageUsed(core) - 2
+	m := built(t, w, KMiner, ironSpot(t, w))
+	run(w, 90)
+	if used := w.StorageUsed(core); used > CoreCap {
+		t.Fatalf("town hall overfilled: %d", used)
+	}
+	if m.OutN < OutCap-1 {
+		t.Fatalf("miner should back up when storage is full, out=%d", m.OutN)
+	}
+	full := false
+	for _, n := range w.Notices {
+		if strings.Contains(n, "Склади заповнені") {
+			full = true
+		}
+	}
+	if !full {
+		t.Fatalf("expected a storage-full warning, got %v", w.Notices)
+	}
+	// a storehouse unblocks production
+	ch := built(t, w, KChest, Pos{4, 4})
+	run(w, 120)
+	if ch.StoreCount() == 0 {
+		t.Fatal("goods should go to the new storehouse")
+	}
+	if ch.StoreCount() > ChestCap {
+		t.Fatalf("storehouse overfilled: %d", ch.StoreCount())
 	}
 }

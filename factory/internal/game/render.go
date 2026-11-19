@@ -187,7 +187,7 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	case sim.KChest:
 		fillRoundRect(dst, bx+bw*0.1, by+bw*0.18, bw*0.8, bw*0.64, s*0.08, fade(mix(colBody, acc, 0.35)))
 		line(dst, bx+bw*0.1, by+bw*0.38, bx+bw*0.9, by+bw*0.38, max32(1, s*0.05), fade(mix(acc, colInk, 0.4)))
-		fill := float32(b.StoreCount()) / float32(g.w.ChestCapacity())
+		fill := float32(b.StoreCount()) / float32(g.w.StorageCap(b))
 		if fill > 0 {
 			fillRect(dst, bx+bw*0.15, by+bw*0.76-bw*0.3*fill, bw*0.7, bw*0.3*fill, fade(acc))
 		}
