@@ -28,6 +28,7 @@ type Scene struct {
 	Selected int32
 	Radius   [3]float64 // x, y, r of a highlighted work radius (r=0: none)
 	order    []int
+	LastTris int // triangles drawn in the last frame
 }
 
 var (
@@ -255,6 +256,7 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 		}
 	}
 	b.flush()
+	s.LastTris = b.Tris
 }
 
 func drawTree(b *Batch, x, y int, top, grow float64) {

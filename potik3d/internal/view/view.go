@@ -98,6 +98,7 @@ type Batch struct {
 	verts []ebiten.Vertex
 	idx   []uint16
 	Alpha float64 // < 1 draws translucent (placement previews)
+	Tris  int     // triangles emitted (for performance checks)
 }
 
 func (b *Batch) flush() {
@@ -128,6 +129,7 @@ func (b *Batch) Poly(c color.RGBA, pts ...[3]float64) {
 	}
 	for k := 1; k+1 < len(pts); k++ {
 		b.idx = append(b.idx, base, base+uint16(k), base+uint16(k+1))
+		b.Tris++
 	}
 }
 

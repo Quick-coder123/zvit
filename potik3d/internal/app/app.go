@@ -62,6 +62,7 @@ type Game struct {
 
 	shot       string
 	debugHover bool
+	stats      bool
 	shotFrames int
 }
 
@@ -481,6 +482,9 @@ func placementHint(k world.Kind, p world.Placement) string {
 	}
 	return "ЛКМ — поставити"
 }
+
+// DebugStats prints the triangle count with the screenshot.
+func (g *Game) DebugStats(on bool) { g.stats = on }
 
 // DebugPitch sets the camera pitch for screenshots.
 func (g *Game) DebugPitch(p float64) { g.scene.Cam.Pitch = p }

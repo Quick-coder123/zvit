@@ -471,6 +471,9 @@ func (g *Game) drawMenu(dst *ebiten.Image, W, H, u float64) {
 }
 
 func (g *Game) saveShot(screen *ebiten.Image) {
+	if g.stats {
+		fmt.Fprintf(os.Stderr, "tris=%d\n", g.scene.LastTris)
+	}
 	b := screen.Bounds()
 	img := image.NewRGBA(b)
 	screen.ReadPixels(img.Pix)

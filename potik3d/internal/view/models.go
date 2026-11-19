@@ -26,40 +26,151 @@ func drawBuilding(b *Batch, w *world.World, bd *world.Building, base, t float64,
 	}
 	switch bd.Kind {
 	case world.KHall:
-		b.Box(x0+0.15, y0+0.15, base, x0+s-0.15, y0+s-0.15, base+0.9, wall, wall)
-		b.Pyramid(x0+s/2, y0+s/2, base+0.9, s*0.62, 0.9, 4, math.Pi/4, rgb(0x4F7A8C))
-		b.Box(x0+s/2-0.12, y0+s/2-0.12, base+1.6, x0+s/2+0.12, y0+s/2+0.12, base+2.2, rgb(0x6B4F3A), rgb(0x6B4F3A))
-		b.Pyramid(x0+s/2, y0+s/2, base+2.2, 0.35, 0.3, 4, math.Pi/4, rgb(0x4FA3A5))
+		ax0, ay0, ax1, ay1 := x0+0.15, y0+0.15, x0+s-0.15, y0+s-0.15
+		top := base + 0.9
+		b.Box(ax0, ay0, base, ax1, ay1, top, wall, wall)
+		for side := 0; side < 4; side++ {
+			b.WallRect(ax0, ay0, ax1, ay1, side, 0, 1, base, base+0.14, colStone)
+			for _, u := range []float64{0.18, 0.38, 0.62, 0.82} {
+				if side == sideYP && (u == 0.38 || u == 0.62) {
+					continue
+				}
+				b.window(ax0, ay0, ax1, ay1, side, u, base+0.38, 0.14, 0.24)
+			}
+		}
+		b.door(ax0, ay0, ax1, ay1, sideYP, 0.5, base, 0.3, 0.46)
+		apex := top + 0.9
+		b.Pyramid(x0+s/2, y0+s/2, top, s*0.62, 0.9, 4, math.Pi/4, rgb(0x4F7A8C))
+		// tower and flag stand on the apex, above the whole roof
+		cx, cy := x0+s/2, y0+s/2
+		tower := rgb(0x6B4F3A)
+		b.Box(cx-0.13, cy-0.13, apex-0.02, cx+0.13, cy+0.13, apex+0.4, tower, tower)
+		b.WallRect(cx-0.13, cy-0.13, cx+0.13, cy+0.13, sideYP, 0.3, 0.7, apex+0.14, apex+0.3, colGlass)
+		b.WallRect(cx-0.13, cy-0.13, cx+0.13, cy+0.13, sideXP, 0.3, 0.7, apex+0.14, apex+0.3, colGlass)
+		b.Pyramid(cx, cy, apex+0.4, 0.24, 0.3, 4, math.Pi/4, rgb(0x4FA3A5))
+		pz := apex + 0.7
+		b.Box(cx-0.015, cy-0.015, pz, cx+0.015, cy+0.015, pz+0.45, rgb(0x5A4636), rgb(0x5A4636))
+		fz := pz + 0.45
+		wv := 0.04 * math.Sin(t*3+float64(bd.ID))
+		flag := rgb(0xE07A5F)
+		b.Poly(flag, [3]float64{cx, cy, fz}, [3]float64{cx + 0.17, cy + wv, fz - 0.02},
+			[3]float64{cx + 0.34, cy - wv, fz - 0.04}, [3]float64{cx + 0.34, cy - wv, fz - 0.17},
+			[3]float64{cx + 0.17, cy + wv, fz - 0.15}, [3]float64{cx, cy, fz - 0.15})
+		if wantsSmoke(bd.ID, bd.Site, bd.Kind, 0) {
+			smoke(b, cx-0.08, cy, pz, t, bd.ID)
+		}
 	case world.KHouse:
-		b.Box(x0+0.15, y0+0.15, base, x0+s-0.15, y0+s-0.15, base+0.55, wall, wall)
-		b.Pyramid(x0+s/2, y0+s/2, base+0.55, s*0.6, 0.5, 4, math.Pi/4, colRoof)
+		drawHouse(b, w, bd, x0, y0, base, t, selected)
 	case world.KWarehouse:
 		col := rgb(0xB08A5A)
 		if selected {
 			col = mix(col, rgb(0xF2D16B), 0.45)
 		}
-		b.Box(x0+0.1, y0+0.1, base, x0+s-0.1, y0+s-0.1, base+0.7, col, col)
-		b.Prism(x0+0.02, y0+0.02, x0+s-0.02, y0+s-0.02, base+0.7, 0.55, rgb(0x7A5536), col)
+		ax0, ay0, ax1, ay1 := x0+0.1, y0+0.1, x0+s-0.1, y0+s-0.42
+		crates := func() {
+			n := 0
+			if bd.Used() > 0 {
+				n = int(math.Ceil(4 * float64(bd.Used()) / float64(bd.Def().Cap)))
+			}
+			cc := rgb(0xC8A06A)
+			for k := 0; k < min(n, 4); k++ {
+				cx := x0 + 0.25 + float64(k%3)*0.32
+				cz := base
+				if k == 3 {
+					cx, cz = x0+0.41, base+0.22
+				}
+				b.Box(cx-0.11, y0+s-0.36, cz, cx+0.11, y0+s-0.14, cz+0.22, cc, rgb(0xD9B27C))
+			}
+		}
+		if b.propFirst(0, 1) {
+			crates()
+		}
+		b.Box(ax0, ay0, base, ax1, ay1, base+0.75, col, col)
+		b.WallRect(ax0, ay0, ax1, ay1, sideYP, 0.32, 0.68, base, base+0.56, colFrame)
+		b.WallRect(ax0, ay0, ax1, ay1, sideYP, 0.34, 0.495, base, base+0.53, colDoor)
+		b.WallRect(ax0, ay0, ax1, ay1, sideYP, 0.505, 0.66, base, base+0.53, colDoor)
+		for _, side := range []int{sideXP, sideXM} {
+			b.window(ax0, ay0, ax1, ay1, side, 0.5, base+0.42, 0.18, 0.14)
+		}
+		b.Prism(x0+0.02, y0+0.02, x0+s-0.02, ay1+0.08, base+0.75, 0.55, rgb(0x7A5536), col)
+		if !b.propFirst(0, 1) {
+			crates()
+		}
 	case world.KTank:
-		b.Prismoid(x0+s/2, y0+s/2, base, 0.38, 0.9, 8, mix(rgb(0x9C7A55), wall, boolf(selected)*0.3))
+		cx, cy := x0+s/2, y0+s/2
+		b.Prismoid(cx, cy, base, 0.38, 0.9, 8, mix(rgb(0x9C7A55), wall, boolf(selected)*0.3))
+		for _, z := range []float64{0.2, 0.62} {
+			b.Ring(cx, cy, base+z, 0.395, 0.05, 8, rgb(0x6E747C))
+		}
 		fill := float64(bd.Used()) / float64(bd.Def().Cap)
-		b.Prismoid(x0+s/2, y0+s/2, base+0.9, 0.33, 0.02, 8, mix(rgb(0x8A6A48), colWater, fill))
+		b.Prismoid(cx, cy, base+0.9, 0.33, 0.02, 8, mix(rgb(0x8A6A48), colWater, fill))
 	case world.KLumber:
-		b.Box(x0+0.2, y0+0.2, base, x0+s-0.2, y0+s-0.2, base+0.45, rgb(0xB08A5A), rgb(0xB08A5A))
+		logs := func() {
+			for k := 0; k < min(3, (bd.OutN+1)/2); k++ {
+				b.Box(x0+0.22, y0+0.84, base+float64(k)*0.09, x0+0.78, y0+0.96, base+float64(k)*0.09+0.09, rgb(0x9C6B45), rgb(0xE3C79B))
+			}
+		}
+		stump := func() {
+			b.Prismoid(x0+0.1, y0+0.1, base, 0.07, 0.12, 6, rgb(0x7A5536))
+			b.Box(x0+0.09, y0+0.06, base+0.12, x0+0.11, y0+0.14, base+0.2, rgb(0x6B4F3A), rgb(0x6B4F3A))
+			b.Box(x0+0.08, y0+0.04, base+0.17, x0+0.12, y0+0.08, base+0.24, rgb(0x9AA0AC), rgb(0xB8C0CC))
+		}
+		if b.propFirst(0, 1) {
+			logs()
+		}
+		if b.propFirst(-1, -1) {
+			stump()
+		}
+		ax0, ay0, ax1, ay1 := x0+0.2, y0+0.2, x0+s-0.2, y0+s-0.2
+		b.Box(ax0, ay0, base, ax1, ay1, base+0.45, rgb(0xB08A5A), rgb(0xB08A5A))
+		b.door(ax0, ay0, ax1, ay1, sideXP, 0.5, base, 0.14, 0.28)
+		b.window(ax0, ay0, ax1, ay1, sideYM, 0.5, base+0.2, 0.12, 0.12)
 		b.Pyramid(x0+s/2, y0+s/2, base+0.45, s*0.55, 0.35, 4, math.Pi/4, rgb(0x7A5536))
-		for k := 0; k < min(3, bd.OutN/2+1); k++ {
-			ly := y0 + s - 0.12 - float64(k)*0.12
-			b.Box(x0+0.08, ly-0.05, base, x0+s*0.6, ly+0.05, base+0.1, rgb(0x9C6B45), rgb(0xE3C79B))
+		if !b.propFirst(0, 1) {
+			logs()
+		}
+		if !b.propFirst(-1, -1) {
+			stump()
 		}
 	case world.KForester:
-		b.Box(x0+0.2, y0+0.2, base, x0+s-0.2, y0+s-0.2, base+0.45, rgb(0xC8B48A), rgb(0xC8B48A))
+		pots := func() {
+			for _, px := range []float64{0.32, 0.68} {
+				b.Prismoid(x0+px, y0+0.9, base, 0.06, 0.08, 6, rgb(0xB5654A))
+				b.Pyramid(x0+px, y0+0.9, base+0.08, 0.07, 0.2, 5, px, colLeaf)
+			}
+		}
+		if b.propFirst(0, 1) {
+			pots()
+		}
+		ax0, ay0, ax1, ay1 := x0+0.2, y0+0.2, x0+s-0.2, y0+s-0.2
+		b.Box(ax0, ay0, base, ax1, ay1, base+0.45, rgb(0xC8B48A), rgb(0xC8B48A))
+		b.door(ax0, ay0, ax1, ay1, sideXP, 0.5, base, 0.14, 0.28)
+		b.window(ax0, ay0, ax1, ay1, sideYP, 0.5, base+0.2, 0.12, 0.12)
+		b.WallRect(ax0, ay0, ax1, ay1, sideYM, 0.25, 0.75, base+0.3, base+0.4, rgb(0x5E8A55))
 		b.Pyramid(x0+s/2, y0+s/2, base+0.45, s*0.55, 0.35, 4, math.Pi/4, rgb(0x5E8A55))
-		b.Pyramid(x0+0.2, y0+s-0.2, base, 0.12, 0.3, 5, 0, colLeaf)
+		if !b.propFirst(0, 1) {
+			pots()
+		}
 	case world.KGatherer:
-		b.Box(x0+0.2, y0+0.2, base, x0+s-0.2, y0+s-0.2, base+0.4, rgb(0xD9C29A), rgb(0xD9C29A))
+		basket := func() {
+			b.Prismoid(x0+0.9, y0+0.5, base, 0.08, 0.1, 6, rgb(0xC8A97E))
+			for k := 0; k < min(3, bd.OutN); k++ {
+				a := float64(k) * 2.1
+				px, py := x0+0.9+math.Cos(a)*0.03, y0+0.5+math.Sin(a)*0.03
+				b.Box(px-0.03, py-0.03, base+0.1, px+0.03, py+0.03, base+0.15, rgb(0xC0504D), rgb(0xD9605A))
+			}
+		}
+		if b.propFirst(1, 0) {
+			basket()
+		}
+		ax0, ay0, ax1, ay1 := x0+0.2, y0+0.2, x0+s-0.2, y0+s-0.2
+		b.Box(ax0, ay0, base, ax1, ay1, base+0.4, rgb(0xD9C29A), rgb(0xD9C29A))
+		b.door(ax0, ay0, ax1, ay1, sideYP, 0.5, base, 0.14, 0.27)
+		b.window(ax0, ay0, ax1, ay1, sideXM, 0.5, base+0.18, 0.12, 0.11)
+		b.WallRect(ax0, ay0, ax1, ay1, sideYM, 0.3, 0.7, base+0.24, base+0.34, rgb(0xC0504D))
 		b.Pyramid(x0+s/2, y0+s/2, base+0.4, s*0.55, 0.32, 4, math.Pi/4, rgb(0x9C6B45))
-		if bd.OutN > 0 {
-			b.Box(x0+0.65, y0+0.65, base, x0+0.9, y0+0.9, base+0.12, rgb(0xC8A97E), rgb(0xC0504D))
+		if !b.propFirst(1, 0) {
+			basket()
 		}
 	case world.KFarm:
 		b.Box(x0+0.04, y0+0.04, base, x0+s-0.04, y0+s-0.04, base+0.04, rgb(0x8A6A48), rgb(0x8A6A48))
@@ -80,6 +191,12 @@ func drawBuilding(b *Batch, w *world.World, bd *world.Building, base, t float64,
 			}
 		}
 	case world.KPump:
+		bucket := func() {
+			b.Prismoid(x0+0.5, y0+0.86, base, 0.06, 0.1, 6, rgb(0x8C99A6))
+		}
+		if b.propFirst(0, 1) {
+			bucket()
+		}
 		b.Box(x0+0.25, y0+0.25, base, x0+s-0.25, y0+s-0.25, base+0.3, rgb(0xA8A39A), colWater)
 		b.Box(x0+s/2-0.05, y0+s/2-0.05, base+0.3, x0+s/2+0.05, y0+s/2+0.05, base+0.8, rgb(0x6B4F3A), rgb(0x6B4F3A))
 		arm := 0.0
@@ -87,8 +204,24 @@ func drawBuilding(b *Batch, w *world.World, bd *world.Building, base, t float64,
 			arm = 0.2 * math.Sin(t*3)
 		}
 		b.Box(x0+s/2-0.3, y0+s/2-0.04, base+0.8+arm*0.3, x0+s/2+0.3, y0+s/2+0.04, base+0.86+arm*0.3, rgb(0x6B4F3A), rgb(0x7A5536))
+		if !b.propFirst(0, 1) {
+			bucket()
+		}
 	case world.KSawmill:
+		shed := func() {
+			for _, px := range []float64{0.08, 0.92} {
+				b.Box(x0+px-0.03, y0+0.1, base, x0+px+0.03, y0+0.16, base+0.85, colWood, colWood)
+			}
+			b.Box(x0+0.02, y0+0.04, base+0.85, x0+0.98, y0+0.4, base+0.9, rgb(0x7A5536), rgb(0x8C6B4A))
+		}
+		if b.propFirst(0, -1) {
+			shed()
+		}
 		b.Box(x0+0.1, y0+0.2, base, x0+s-0.1, y0+s-0.2, base+0.35, colWood, colWoodLt)
+		for k := 0; k < min(3, bd.InN); k++ {
+			ly := y0 + 0.3 + float64(k)*0.13
+			b.Box(x0+0.12, ly, base+0.35, x0+0.3, ly+0.1, base+0.45, rgb(0x9C6B45), rgb(0xE3C79B))
+		}
 		r := 0.22
 		ang := 0.0
 		if bd.Working {
@@ -101,18 +234,31 @@ func drawBuilding(b *Batch, w *world.World, bd *world.Building, base, t float64,
 			b.Box(px-0.03, y0+s/2-0.01, pz-0.03, px+0.03, y0+s/2+0.01, pz+0.03, rgb(0x9AA0AC), rgb(0xB8C0CC))
 		}
 		if bd.OutN > 0 {
-			b.Box(x0+0.1, y0+s-0.2, base, x0+0.6, y0+s-0.05, base+0.08*float64(min(bd.OutN, 4)), rgb(0xD9B27C), rgb(0xE3C79B))
+			b.Box(x0+0.5, y0+s-0.2, base, x0+0.9, y0+s-0.05, base+0.08*float64(min(bd.OutN, 4)), rgb(0xD9B27C), rgb(0xE3C79B))
+		}
+		if !b.propFirst(0, -1) {
+			shed()
 		}
 	case world.KDam:
 		b.Box(x0, y0+0.15, base, x0+s, y0+s-0.15, base+LevelH, rgb(0x8C6B4A), rgb(0x9C7A55))
 	case world.KCampfire:
+		seats := func(first bool) {
+			for _, d := range []float64{-1, 1} {
+				if b.propFirst(d, 0) != first {
+					continue
+				}
+				b.Box(x0+0.5+d*0.38-0.06, y0+0.3, base, x0+0.5+d*0.38+0.06, y0+0.7, base+0.1, rgb(0x9C6B45), rgb(0xC8A06A))
+			}
+		}
+		seats(true)
 		for k := 0; k < 6; k++ {
 			a := float64(k) * math.Pi / 3
-			b.Box(x0+0.5+math.Cos(a)*0.28-0.05, y0+0.5+math.Sin(a)*0.28-0.05, base, x0+0.5+math.Cos(a)*0.28+0.05, y0+0.5+math.Sin(a)*0.28+0.05, base+0.08, colRock, colRock)
+			b.Box(x0+0.5+math.Cos(a)*0.2-0.05, y0+0.5+math.Sin(a)*0.2-0.05, base, x0+0.5+math.Cos(a)*0.2+0.05, y0+0.5+math.Sin(a)*0.2+0.05, base+0.08, colRock, colRock)
 		}
 		fl := 0.85 + 0.15*math.Sin(t*9)
-		b.Pyramid(x0+0.5, y0+0.5, base, 0.16, 0.45*fl, 5, t, rgb(0xF2A65A))
-		b.Pyramid(x0+0.5, y0+0.5, base, 0.09, 0.3*fl, 5, -t, rgb(0xF7D774))
+		b.Pyramid(x0+0.5, y0+0.5, base, 0.14, 0.45*fl, 5, t, rgb(0xF2A65A))
+		b.Pyramid(x0+0.5, y0+0.5, base, 0.08, 0.3*fl, 5, -t, rgb(0xF7D774))
+		seats(false)
 	}
 }
 
