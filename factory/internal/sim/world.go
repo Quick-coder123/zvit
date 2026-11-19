@@ -160,6 +160,8 @@ type World struct {
 	grid       map[Pos]int32
 	chunks     map[Pos]*[chunkSize * chunkSize]Item
 	fullWarned uint64
+	wellbeing  float64
+	needShare  [NeedCount]float64
 
 	height     []uint8
 	wall       []float32
@@ -185,6 +187,7 @@ func NewWorld(seed int64) *World {
 	w.Free[KLab] = 1
 	w.Free[KLumber] = 1
 	w.Free[KPump] = 1
+	w.Free[KCampfire] = 1
 	w.Stock[Wood] = 30
 	w.Stock[Water] = 40
 	w.SeasonLeft = w.WetLength(0)
@@ -463,6 +466,9 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 	if k == KSawmill {
 		w.SetRecipe(b.ID, sawmillRecipe)
 	}
+	if k == KBakery {
+		w.SetRecipe(b.ID, bakeryRecipe)
+	}
 	for y := 0; y < b.Size(); y++ {
 		for x := 0; x < b.Size(); x++ {
 			w.clearVeg(p.Add(x, y))
@@ -604,6 +610,15 @@ func MinerRate(b *Building) float64 {
 	}
 	return SpeedOf(b.Kind) * float64(b.MinerTiles) / float64(n) / MinerTime
 }
+
+var bakeryRecipe = func() int {
+	for i, r := range Recipes {
+		if r.Machine == KBakery {
+			return i
+		}
+	}
+	return -1
+}()
 
 // sawmillRecipe is the only recipe of a sawmill (wood -> planks).
 var sawmillRecipe = func() int {

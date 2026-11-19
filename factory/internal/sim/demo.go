@@ -36,6 +36,12 @@ func BuildDemo(w *World) {
 		place(KHouse, p.X, p.Y)
 		_ = i
 	}
+	place(KCampfire, 0, 6)
+	place(KFlowerbed, -3, 6)
+	place(KFlowerbed, 3, 6)
+	place(KFlowerbed, -2, 2)
+	place(KStatue, 2, 2)
+	place(KBakery, 6, 1)
 	place(KLumber, 5, 10)
 	place(KForester, 9, 12)
 	place(KGatherer, -6, 9)

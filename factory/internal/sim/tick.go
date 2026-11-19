@@ -25,7 +25,7 @@ func (w *World) Update(active ActiveFunc) {
 		switch b.Kind.Base() {
 		case KMiner:
 			w.stepMiner(b)
-		case KFurnace, KAssembler, KSawmill:
+		case KFurnace, KAssembler, KSawmill, KBakery:
 			w.stepCrafter(b)
 		case KFarm:
 			w.stepFarm(b)
@@ -46,7 +46,7 @@ func (w *World) Update(active ActiveFunc) {
 
 // workRate is how fast a running building works, slowed by hungry workers.
 func (w *World) workRate(b *Building) float64 {
-	r := SpeedOf(b.Kind)
+	r := SpeedOf(b.Kind) * w.Productivity()
 	if b.hungry {
 		r *= 0.5
 	}
@@ -91,7 +91,7 @@ func (w *World) stepMiner(b *Building) {
 		return
 	}
 	b.Working = true
-	rate := MinerRate(b) * w.MineMul()
+	rate := MinerRate(b) * w.MineMul() * w.Productivity()
 	if b.hungry {
 		rate *= 0.5
 	}

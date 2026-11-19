@@ -257,6 +257,37 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 				fillCircle(dst, cx+float32(math.Sin(ph*6+float64(k)))*fh*0.12, cy-fh*float32(0.1+ph*0.6), max32(1, s*0.035), fade(rgba(0x8E7CC3, uint8(220*(1-ph)))))
 			}
 		}
+	case sim.KCampfire:
+		for k := 0; k < 6; k++ {
+			a := float64(k) * math.Pi / 3
+			fillCircle(dst, cx+float32(math.Cos(a))*bw*0.3, cy+float32(math.Sin(a))*bw*0.3, bw*0.08, fade(rgb(0x9AA0AC)))
+		}
+		fl := float32(0.85 + 0.15*math.Sin(t*9))
+		path.MoveTo(cx, cy-bw*0.3*fl)
+		path.QuadTo(cx+bw*0.2, cy, cx, cy+bw*0.15)
+		path.QuadTo(cx-bw*0.2, cy, cx, cy-bw*0.3*fl)
+		path.Close()
+		fillPath(dst, fade(acc))
+		fillCircle(dst, cx, cy+bw*0.02, bw*0.07, fade(rgb(0xF7D774)))
+	case sim.KFlowerbed:
+		fillRoundRect(dst, cx-bw*0.36, cy-bw*0.36, bw*0.72, bw*0.72, s*0.12, fade(rgb(0x8DB360)))
+		cols := []color.RGBA{rgb(0xD97BA6), rgb(0xF2D16B), rgb(0xE07A5F), rgb(0xFBF9F4)}
+		for k := 0; k < 5; k++ {
+			a := float64(k)*1.256 + 0.3
+			fx := cx + float32(math.Cos(a))*bw*0.2
+			fy := cy + float32(math.Sin(a))*bw*0.2
+			fillCircle(dst, fx, fy, bw*0.09, fade(cols[k%len(cols)]))
+		}
+	case sim.KStatue:
+		fillRoundRect(dst, cx-bw*0.3, cy+bw*0.12, bw*0.6, bw*0.2, s*0.04, fade(rgb(0xB9AE9E)))
+		fillCircle(dst, cx, cy-bw*0.22, bw*0.13, fade(acc))
+		fillRoundRect(dst, cx-bw*0.15, cy-bw*0.1, bw*0.3, bw*0.24, s*0.06, fade(acc))
+	case sim.KBakery:
+		fillRoundRect(dst, cx-bw*0.32, cy-bw*0.05, bw*0.64, bw*0.36, s*0.15, fade(rgb(0x6B4F3A)))
+		if b.Working {
+			fillRoundRect(dst, cx-bw*0.2, cy+bw*0.05, bw*0.4, bw*0.18, s*0.08, fade(rgb(0xF2A65A)))
+		}
+		drawItem(dst, sim.Bread, cx, cy-bw*0.22, s*0.3)
 	case sim.KPump:
 		fillRoundRect(dst, cx-bw*0.12, cy-bw*0.3, bw*0.24, bw*0.55, s*0.05, fade(rgb(0x6B7385)))
 		line(dst, cx, cy-bw*0.25, cx+bw*0.3, cy-bw*0.35, max32(1.5, s*0.06), fade(colInk))
@@ -451,6 +482,12 @@ func workRadius(k sim.Kind) float64 {
 		return sim.StationRadius
 	case k.IsFieldKind():
 		return sim.FieldRadius + 0.5
+	case k == sim.KCampfire:
+		return sim.LeisureRadius
+	case k == sim.KFlowerbed:
+		return sim.BeautyRadius
+	case k == sim.KStatue:
+		return sim.StatueRadius
 	}
 	return 0
 }

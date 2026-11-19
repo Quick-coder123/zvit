@@ -22,6 +22,8 @@ const (
 	Wood
 	Planks
 	Water
+	Berries
+	Bread
 	ItemCount
 )
 
@@ -29,17 +31,19 @@ const (
 type Shape uint8
 
 const (
-	ShapeOre   Shape = iota // irregular lump
-	ShapePlate              // square tile
-	ShapeBar                // wide rectangle
-	ShapeGem                // diamond
-	ShapeGear               // ring
-	ShapeCoil               // small coil
-	ShapeAmmo               // cartridge
-	ShapeFood               // grain sack
-	ShapeLog                // log
-	ShapeBoard              // planks
-	ShapeDrop               // water
+	ShapeOre     Shape = iota // irregular lump
+	ShapePlate                // square tile
+	ShapeBar                  // wide rectangle
+	ShapeGem                  // diamond
+	ShapeGear                 // ring
+	ShapeCoil                 // small coil
+	ShapeAmmo                 // cartridge
+	ShapeFood                 // grain sack
+	ShapeLog                  // log
+	ShapeBoard                // planks
+	ShapeDrop                 // water
+	ShapeBerries              // berries
+	ShapeBread                // loaf
 )
 
 type ItemDef struct {
@@ -63,10 +67,12 @@ var Items = [ItemCount]ItemDef{
 	Gear:        {"Шестерня", 0x8C99A6, ShapeGear},
 	Wire:        {"Дріт", 0xD9894F, ShapeCoil},
 	Ammo:        {"Набої", 0xC9A227, ShapeAmmo},
-	Food:        {"Їжа", 0xC9B458, ShapeFood},
+	Food:        {"Овочі", 0xC9B458, ShapeFood},
 	Wood:        {"Деревина", 0x9C6B45, ShapeLog},
 	Planks:      {"Дошки", 0xD9B27C, ShapeBoard},
 	Water:       {"Вода", 0x5DA9D6, ShapeDrop},
+	Berries:     {"Ягоди", 0xC0504D, ShapeBerries},
+	Bread:       {"Хліб", 0xD9A35B, ShapeBread},
 }
 
 // Stack is an amount of one item.

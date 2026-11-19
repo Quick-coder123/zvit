@@ -103,7 +103,10 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 			g.DebugSelect(b.ID)
 		}
 	case "town":
-		g.DebugCamera(-1, -1, 56)
+		g.DebugCamera(0, 4, 52)
+		if b := w.At(sim.Pos{X: 0, Y: 4}); b != nil {
+			g.DebugSelect(b.ID)
+		}
 	case "close":
 		g.DebugCamera(6, -4, 64)
 	case "copper":

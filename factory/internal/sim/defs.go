@@ -33,6 +33,10 @@ const (
 	KPump
 	KDam
 	KLevee
+	KCampfire
+	KFlowerbed
+	KStatue
+	KBakery
 	KindCount
 )
 
@@ -139,6 +143,26 @@ var Builds = [KindCount]BuildDef{
 		Desc: "Висока земляна стіна: вода крізь неї не проходить. Захищає від затоплення.",
 		Cost: []Stack{{Stone, 6}, {Wood, 2}},
 	},
+	KCampfire: {
+		Name: "Вогнище", Size: 1, Buildable: true, HP: 100,
+		Desc: "Місце відпочинку: жителі, що живуть у радіусі 7, задоволені відпочинком.",
+		Cost: []Stack{{Wood, 6}, {Stone, 2}},
+	},
+	KFlowerbed: {
+		Name: "Квітник", Size: 1, Buildable: true, HP: 60,
+		Desc: "Прикраса: три квітники в радіусі 5 від дому повністю задовольняють потребу в красі.",
+		Cost: []Stack{{Wood, 2}, {Stone, 2}},
+	},
+	KStatue: {
+		Name: "Статуя", Size: 1, Buildable: true, HP: 400,
+		Desc: "Велика прикраса: сама задовольняє потребу в красі в радіусі 8.",
+		Cost: []Stack{{Stone, 20}, {Planks, 6}},
+	},
+	KBakery: {
+		Name: "Пекарня", Size: 1, Buildable: true, HP: 200, Workers: 1,
+		Desc: "Пече хліб з овочів, палячи дрова. Різна їжа робить жителів щасливішими.",
+		Cost: []Stack{{Planks, 8}, {Stone, 8}},
+	},
 	KSawmill: {
 		Name: "Тартак", Size: 1, Buildable: true, HP: 200, Workers: 1,
 		Desc: "Розпилює деревину на дошки.",
@@ -213,7 +237,7 @@ func BuildTime(k Kind) float64 {
 // IsCrafter reports kinds that run recipes.
 func (k Kind) IsCrafter() bool {
 	b := k.Base()
-	return b == KFurnace || b == KAssembler || b == KSawmill
+	return b == KFurnace || b == KAssembler || b == KSawmill || b == KBakery
 }
 
 // IsStorage reports kinds that hold the settlement's stock.
@@ -242,6 +266,7 @@ var Recipes = []Recipe{
 	{In: []Stack{{CopperPlate, 1}}, Out: Stack{Wire, 2}, Time: 1.6, Machine: KAssembler},
 	{In: []Stack{{IronPlate, 1}, {CopperPlate, 1}}, Out: Stack{Ammo, 1}, Time: 2.4, Machine: KAssembler, Tech: "turret"},
 	{In: []Stack{{Wood, 2}}, Out: Stack{Planks, 1}, Time: 3, Machine: KSawmill},
+	{In: []Stack{{Food, 2}, {Wood, 1}}, Out: Stack{Bread, 3}, Time: 5, Machine: KBakery},
 }
 
 // RecipesFor lists recipe indices usable in a machine kind (locked included).

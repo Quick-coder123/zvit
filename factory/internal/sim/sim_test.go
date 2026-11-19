@@ -182,7 +182,9 @@ func TestSmeltingChain(t *testing.T) {
 
 func TestStarvation(t *testing.T) {
 	w := emptyWorld(3)
-	w.Stock[Food] = 0
+	for _, f := range Foods {
+		w.Stock[f] = 0
+	}
 	for _, s := range w.Settlers {
 		s.MealIn = 1
 	}
@@ -194,7 +196,7 @@ func TestStarvation(t *testing.T) {
 
 func TestFarmFeeds(t *testing.T) {
 	w := emptyWorld(4)
-	w.Stock[Food] = 2
+	w.Stock[Food], w.Stock[Berries], w.Stock[Bread] = 2, 0, 0
 	built(t, w, KFarm, moistSpot(w, Pos{-4, 4}))
 	built(t, w, KPump, pumpSpot(w, Pos{-4, 0}))
 	run(w, 400)
@@ -211,7 +213,9 @@ func TestBirths(t *testing.T) {
 	if w.Population() <= 2 || w.Population() > w.Housing() {
 		t.Fatalf("population %d (housing %d)", w.Population(), w.Housing())
 	}
-	w.Stock[Food] = 0
+	for _, f := range Foods {
+		w.Stock[f] = 0
+	}
 	pop := w.Population()
 	run(w, 2*BirthTime)
 	if w.Population() > pop {

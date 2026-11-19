@@ -78,7 +78,9 @@ func TestForesterPlants(t *testing.T) {
 
 func TestGathererFeeds(t *testing.T) {
 	w := emptyWorld(3)
-	w.Stock[Food] = 0
+	for _, f := range Foods {
+		w.Stock[f] = 0
+	}
 	built(t, w, KGatherer, Pos{-7, 7})
 	for _, s := range w.Settlers {
 		s.MealIn = 1e6 // nobody eats during the test

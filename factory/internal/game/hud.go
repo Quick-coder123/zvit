@@ -11,31 +11,32 @@ import (
 	"potik/internal/sim"
 )
 
-// toolbar groups; the hotkey for each slot is listed in toolKeys.
-var toolGroups = [][]sim.Kind{
-	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation, sim.KLab},
-	{sim.KLumber, sim.KForester, sim.KGatherer, sim.KSawmill},
-	{sim.KPump, sim.KDam, sim.KLevee},
-	{sim.KMiner, sim.KFurnace, sim.KAssembler},
-	{sim.KWall, sim.KFlamer, sim.KTurret},
+// toolCat is a toolbar category; number keys pick a tool inside the
+// current category and [ / ] switch categories.
+type toolCat struct {
+	name  string
+	kinds []sim.Kind
 }
 
-var toolKeys = []ebiten.Key{
-	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
-	ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
-	ebiten.Key0, ebiten.KeyH, ebiten.KeyJ,
-	ebiten.KeyM, ebiten.KeyF, ebiten.KeyG,
-	ebiten.KeyZ, ebiten.KeyX, ebiten.KeyC,
+var toolCats = []toolCat{
+	{"Поселення", []sim.Kind{sim.KHouse, sim.KChest, sim.KStation, sim.KLab}},
+	{"Їжа й ліс", []sim.Kind{sim.KFarm, sim.KGatherer, sim.KBakery, sim.KLumber, sim.KForester, sim.KSawmill}},
+	{"Вода", []sim.Kind{sim.KPump, sim.KDam, sim.KLevee}},
+	{"Виробництво", []sim.Kind{sim.KMiner, sim.KFurnace, sim.KAssembler}},
+	{"Добробут", []sim.Kind{sim.KCampfire, sim.KFlowerbed, sim.KStatue}},
+	{"Оборона", []sim.Kind{sim.KWall, sim.KFlamer, sim.KTurret}},
 }
 
-var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "H", "J", "M", "F", "G", "Z", "X", "C"}
-
-func toolList() []sim.Kind {
-	var out []sim.Kind
-	for _, g := range toolGroups {
-		out = append(out, g...)
+// catOf returns the toolbar category of a building kind.
+func catOf(k sim.Kind) int {
+	for i, c := range toolCats {
+		for _, kk := range c.kinds {
+			if kk == k.Base() {
+				return i
+			}
+		}
 	}
-	return out
+	return -1
 }
 
 func lockGlyph(dst *ebiten.Image, cx, cy, s float32, c color.RGBA) {
@@ -45,76 +46,99 @@ func lockGlyph(dst *ebiten.Image, cx, cy, s float32, c color.RGBA) {
 
 func (g *Game) drawToolbar(dst *ebiten.Image) {
 	u := g.ui
-	slot, gap, groupGap := 46*u, 4*u, 12*u
-	n := 0
-	for _, gr := range toolGroups {
-		n += len(gr)
+	slot, gap := 54*u, 6*u
+	cat := toolCats[g.cat]
+	// category tabs
+	tabH := 26 * u
+	tabsW := 0.0
+	for _, c := range toolCats {
+		tabsW += textWidth(c.name, 12*u, true) + 22*u + 4*u
 	}
-	tw := float64(n)*slot + float64(n-len(toolGroups))*gap + float64(len(toolGroups)-1)*groupGap + 20*u
-	r := rect{g.cam.W/2 - tw/2, g.cam.H - slot - 60*u, tw, slot + 20*u}
+	n := float64(len(cat.kinds))
+	slotsW := n*slot + (n-1)*gap + 20*u
+	tw := math.Max(tabsW+16*u, slotsW)
+	r := rect{g.cam.W/2 - tw/2, g.cam.H - slot - tabH - 70*u, tw, slot + tabH + 30*u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
-	x := r.x + 10*u
-	idx := 0
+	tx := r.x + (r.w-tabsW)/2
+	for i, c := range toolCats {
+		i := i
+		w := textWidth(c.name, 12*u, true) + 22*u
+		tr := rect{tx, r.y + 8*u, w, tabH - 4*u}
+		bg := rgb(0xF0EBE1)
+		tc := colInkSoft
+		if i == g.cat {
+			bg, tc = mix(colBody, colOK, 0.35), colInk
+		} else if tr.has(g.mouseX, g.mouseY) {
+			bg = rgb(0xE5DED0)
+		}
+		fillRoundRect(dst, float32(tr.x), float32(tr.y), float32(tr.w), float32(tr.h), float32(tr.h/2), bg)
+		drawText(dst, c.name, tr.x+tr.w/2, tr.y+3*u, 12*u, true, tc, alignCenter)
+		g.addButton(tr, func() { g.cat = i })
+		tx += w + 4*u
+	}
+	x := r.x + (r.w-slotsW)/2 + 10*u
 	var hover sim.Kind
-	for gi, gr := range toolGroups {
-		if gi > 0 {
-			x += groupGap - gap
-			line(dst, float32(x-groupGap/2+gap/2), float32(r.y+16*u), float32(x-groupGap/2+gap/2), float32(r.y+r.h-16*u), float32(1*u), colPanelLine)
+	for idx, k := range cat.kinds {
+		k := k
+		sr := rect{x, r.y + tabH + 14*u, slot, slot}
+		unlocked := g.w.Unlocked(k)
+		active := g.tool != sim.KNone && g.tool.Base() == k
+		shown := k
+		if active {
+			shown = g.tool
 		}
-		for _, k := range gr {
-			k := k
-			sr := rect{x, r.y + 10*u, slot, slot}
-			unlocked := g.w.Unlocked(k)
-			active := g.tool != sim.KNone && g.tool.Base() == k
-			shown := k
-			if active {
-				shown = g.tool
-			}
-			bg := rgb(0xF7F4EE)
-			if active {
-				bg = mix(colBody, colOK, 0.25)
-			}
-			fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), bg)
-			if active {
-				strokeRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), float32(2*u), colOK)
-			}
-			if big := k.Big(); big != sim.KNone && g.w.Unlocked(big) {
-				label := "2×2"
-				lc := colInkSoft
-				if shown == big {
-					lc = colOK
-				}
-				drawText(dst, label, sr.x+sr.w-5*u, sr.y+2*u, 10*u, true, lc, alignRight)
-			}
-			if unlocked {
-				g.iconBuilding(dst, shown, sr.x+7*u, sr.y+8*u, slot-14*u, sim.East)
-			} else {
-				g.iconBuilding(dst, k, sr.x+7*u, sr.y+8*u, slot-14*u, sim.East)
-				fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), rgba(0xF7F4EE, 0xC8))
-				lockGlyph(dst, float32(sr.x+sr.w/2), float32(sr.y+sr.h/2+2*u), float32(18*u), rgb(0x9AA0AC))
-			}
-			nc := colInkSoft
-			if unlocked && !g.w.CanAfford(shown) {
-				nc = colBad
-			}
-			drawText(dst, toolKeyLabels[idx], sr.x+5*u, sr.y+2*u, 11*u, true, nc, alignLeft)
-			if f := g.w.Free[k]; f > 0 && unlocked {
-				label := fmt.Sprintf("×%d", f)
-				bw := textWidth(label, 10.5*u, true) + 10*u
-				fillRoundRect(dst, float32(sr.x+sr.w-bw-2*u), float32(sr.y+sr.h-18*u), float32(bw), float32(16*u), float32(8*u), colOK)
-				drawText(dst, label, sr.x+sr.w-bw/2-2*u, sr.y+sr.h-17*u, 10.5*u, true, colBody, alignCenter)
-			}
-			g.addButton(sr, func() { g.selectTool(k) })
-			if sr.has(g.mouseX, g.mouseY) {
-				hover = shown
-			}
-			x += slot + gap
-			idx++
+		bg := rgb(0xF7F4EE)
+		if active {
+			bg = mix(colBody, colOK, 0.25)
 		}
+		fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), bg)
+		if active {
+			strokeRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), float32(2*u), colOK)
+		}
+		if big := k.Big(); big != sim.KNone && g.w.Unlocked(big) {
+			lc := colInkSoft
+			if shown == big {
+				lc = colOK
+			}
+			drawText(dst, "2×2", sr.x+sr.w-5*u, sr.y+2*u, 10*u, true, lc, alignRight)
+		}
+		g.iconBuilding(dst, shown, sr.x+9*u, sr.y+9*u, slot-18*u, sim.East)
+		if !unlocked {
+			fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), rgba(0xF7F4EE, 0xC8))
+			lockGlyph(dst, float32(sr.x+sr.w/2), float32(sr.y+sr.h/2+2*u), float32(16*u), rgb(0x9AA0AC))
+		}
+		nc := colInkSoft
+		if unlocked && !g.w.CanAfford(shown) {
+			nc = colBad
+		}
+		drawText(dst, fmt.Sprint(idx+1), sr.x+5*u, sr.y+2*u, 11*u, true, nc, alignLeft)
+		if f := g.w.Free[k]; f > 0 && unlocked {
+			label := fmt.Sprintf("×%d", f)
+			bw := textWidth(label, 10.5*u, true) + 10*u
+			fillRoundRect(dst, float32(sr.x+sr.w-bw-2*u), float32(sr.y+sr.h-18*u), float32(bw), float32(16*u), float32(8*u), colOK)
+			drawText(dst, label, sr.x+sr.w-bw/2-2*u, sr.y+sr.h-17*u, 10.5*u, true, colBody, alignCenter)
+		}
+		g.addButton(sr, func() { g.selectTool(k) })
+		if sr.has(g.mouseX, g.mouseY) {
+			hover = shown
+		}
+		x += slot + gap
+	}
+	// free starter buildings in other categories get a dot on their tab
+	tx = r.x + (r.w-tabsW)/2
+	for _, c := range toolCats {
+		w := textWidth(c.name, 12*u, true) + 22*u
+		for _, k := range c.kinds {
+			if g.w.Free[k] > 0 && g.w.Unlocked(k) {
+				fillCircle(dst, float32(tx+w-6*u), float32(r.y+10*u), float32(4*u), colOK)
+				break
+			}
+		}
+		tx += w + 4*u
 	}
 	// research button at the right of the toolbar
-	rb := rect{r.x + r.w + 10*u, r.y, 112 * u, r.h}
+	rb := rect{r.x + r.w + 10*u, r.y + r.h - 82*u, 112 * u, 82 * u}
 	avail := len(g.w.ResearchQueue)
 	panel(dst, rb, u)
 	g.panels = append(g.panels, rb)

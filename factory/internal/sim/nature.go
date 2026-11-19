@@ -193,9 +193,9 @@ func (w *World) stepFieldWorker(s *Settler, b *Building) bool {
 		}
 		return true
 	case 2: // working on the tile
-		rate := 1.0
+		rate := w.Productivity()
 		if s.Starved() {
-			rate = 0.5
+			rate *= 0.5
 		}
 		s.FieldT -= float32(DT * rate)
 		if s.FieldT > 0 {
@@ -209,7 +209,7 @@ func (w *World) stepFieldWorker(s *Settler, b *Building) bool {
 			s.Carry = Stack{Wood, WoodPerTree}
 		case b.Kind == KGatherer && v == VegBush && g >= 1:
 			w.Picked[p] = w.Tick
-			s.Carry = Stack{Food, FoodPerBush}
+			s.Carry = Stack{Berries, FoodPerBush}
 		case b.Kind == KForester && v == VegNone && w.At(p) == nil:
 			delete(w.Cleared, p)
 			w.Planted[p] = w.Tick

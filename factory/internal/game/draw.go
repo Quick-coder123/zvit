@@ -59,6 +59,10 @@ var (
 		sim.KPump:      rgb(0x5DA9D6),
 		sim.KDam:       rgb(0x8C6B4A),
 		sim.KLevee:     rgb(0xA89C8C),
+		sim.KCampfire:  rgb(0xE07A3F),
+		sim.KFlowerbed: rgb(0xD97BA6),
+		sim.KStatue:    rgb(0x9AA0AC),
+		sim.KBakery:    rgb(0xD9A35B),
 	}
 )
 
@@ -229,6 +233,20 @@ func drawItem(dst *ebiten.Image, it sim.Item, cx, cy, s float32) {
 		path.Close()
 		fillPath(dst, c)
 		fillCircle(dst, cx-h*0.2, cy+h*0.2, h*0.15, rgba(0xFFFFFF, 0xAA))
+	case sim.ShapeBerries:
+		for k := 0; k < 3; k++ {
+			a := float64(k)*2.1 + 0.4
+			fillCircle(dst, cx+float32(math.Cos(a))*h*0.35, cy+float32(math.Sin(a))*h*0.35, h*0.42, c)
+		}
+		fillCircle(dst, cx-h*0.1, cy-h*0.15, h*0.12, rgba(0xFFFFFF, 0x99))
+		line(dst, cx, cy-h*0.3, cx+h*0.3, cy-h*0.85, max32(1, s*0.06), rgb(0x6FA06A))
+	case sim.ShapeBread:
+		fillRoundRect(dst, cx-h*0.85, cy-h*0.45, h*1.7, h*0.95, h*0.45, c)
+		strokeRoundRect(dst, cx-h*0.85, cy-h*0.45, h*1.7, h*0.95, h*0.45, max32(1, s*0.06), dark)
+		for k := -1; k <= 1; k++ {
+			x := cx + float32(k)*h*0.42
+			line(dst, x-h*0.12, cy-h*0.3, x+h*0.12, cy+h*0.1, max32(1, s*0.05), dark)
+		}
 	case sim.ShapeLog:
 		fillRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, c)
 		strokeRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, max32(1, s*0.06), dark)

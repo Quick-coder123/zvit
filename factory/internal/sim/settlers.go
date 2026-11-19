@@ -36,6 +36,8 @@ type Settler struct {
 	FieldY     int
 	FieldT     float32
 
+	LastFood Item // the last two meals, for a varied diet
+	PrevFood Item
 	DrinkIn  float32 // seconds until the next drink
 	Thirst   float32 // seconds spent without water
 	MealIn   float32 // seconds until the next meal
@@ -96,7 +98,7 @@ func (w *World) Capacity(s *Settler) int {
 }
 
 func (w *World) speed(s *Settler) float64 {
-	v := WalkSpeed
+	v := WalkSpeed * (0.9 + 0.05*w.wellbeing)
 	if w.station(s) != nil {
 		v = CarrierSpeed
 	}
@@ -192,13 +194,16 @@ func (w *World) updateSettlers() {
 	if w.Tick%allocEvery == 0 {
 		w.allocate()
 	}
+	if w.Tick%TPS == 0 {
+		w.updateWellbeing()
+	}
 }
 
 func (w *World) stepSettler(s *Settler) {
 	// eating
 	s.MealIn -= DT
 	if s.MealIn <= 0 {
-		if w.eat() {
+		if w.eat(s) {
 			s.MealIn = MealInterval
 			s.Starving = 0
 		} else {
@@ -229,9 +234,9 @@ func (w *World) stepSettler(s *Settler) {
 			return
 		}
 		if w.walkTo(s, site) {
-			rate := 1.0
+			rate := w.Productivity()
 			if s.Starved() {
-				rate = 0.5
+				rate *= 0.5
 			}
 			site.BuildWork += float32(DT * rate / BuildTime(site.Kind))
 			if site.BuildWork >= 1 {
@@ -424,7 +429,7 @@ func (w *World) nearestStorage(x, y float64, n int, exclude int32) *Building {
 
 func (w *World) updateBirths() {
 	pop, cap := len(w.Settlers), w.Housing()
-	food := min(w.TotalStock(Food), w.WaterAvailable())
+	food := min(w.FoodAvailable(), w.WaterAvailable())
 	starving := false
 	for _, s := range w.Settlers {
 		if s.Starved() {
@@ -454,7 +459,7 @@ func (w *World) updateBirths() {
 		if b.Site || Builds[b.Kind].Housing == 0 || residents[b.ID] < 2 {
 			continue
 		}
-		b.Progress += float32(DT / BirthTime)
+		b.Progress += float32(DT / BirthTime * (0.6 + 0.2*w.wellbeing))
 		if b.Progress >= 1 {
 			b.Progress = 0
 			s := w.spawnSettler(b)
@@ -868,32 +873,6 @@ func (w *World) Residents(id int32) int {
 		}
 	}
 	return n
-}
-
-// FoodAvailable counts food in storage and waiting at farms.
-func (w *World) FoodAvailable() int {
-	n := w.TotalStock(Food)
-	for _, b := range w.Buildings {
-		if b.OutItem == Food {
-			n += b.OutN
-		}
-	}
-	return n
-}
-
-// eat takes one food from storage or, when storage has none, straight from
-// a farm's or gatherer's store, so full warehouses never starve the town.
-func (w *World) eat() bool {
-	if w.TakeStock(Food, 1) {
-		return true
-	}
-	for _, id := range w.Order() {
-		if b := w.Buildings[id]; b.OutItem == Food && b.OutN > b.res[Food] {
-			b.OutN--
-			return true
-		}
-	}
-	return false
 }
 
 // WaterAvailable counts drinking water in storage and at pumps.

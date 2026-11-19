@@ -132,11 +132,11 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 		}
 	}
 	rows := max((len(items)+1)/2, 1)
-	r := rect{14 * u, 14 * u, 250 * u, (50 + float64(rows)*26 + 130) * u}
+	r := rect{14 * u, 14 * u, 250 * u, (50 + float64(rows)*26 + 152) * u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
 	g.drawTown(dst, r.x+14*u, r.y+10*u)
-	r.y += 130 * u
+	r.y += 152 * u
 	line(dst, float32(r.x+14*u), float32(r.y), float32(r.x+r.w-14*u), float32(r.y), float32(u), colPanelLine)
 	drawText(dst, "Запаси", r.x+14*u, r.y+10*u, 14*u, true, colInk, alignLeft)
 	used, total := g.w.StorageTotals()
@@ -210,6 +210,24 @@ func (g *Game) drawTown(dst *ebiten.Image, x, y float64) {
 		wc = colBad
 	}
 	drawText(dst, fmt.Sprintf("вода %d · на %s", w.WaterAvailable(), fmtMinutes(wm)), x+22*u, y+90*u, 12.5*u, true, wc, alignLeft)
+	// wellbeing
+	wb := w.Wellbeing()
+	sx, sy := float32(x+8*u), float32(y+121*u)
+	fillCircle(dst, sx, sy, float32(7*u), mix(colBad, colOK, wb/5))
+	fillCircle(dst, sx-float32(2.5*u), sy-float32(2*u), float32(1.2*u), colBody)
+	fillCircle(dst, sx+float32(2.5*u), sy-float32(2*u), float32(1.2*u), colBody)
+	drawText(dst, fmt.Sprintf("добробут %.1f/5 · робота ×%.2f", wb, w.Productivity()), x+22*u, y+112*u, 12.5*u, true, colInk, alignLeft)
+	if (rect{x, y + 108*u, 222 * u, 24 * u}).has(g.mouseX, g.mouseY) {
+		body := ""
+		for n := sim.Need(0); n < sim.NeedCount; n++ {
+			if n > 0 {
+				body += "\n"
+			}
+			body += fmt.Sprintf("%s: %d%% жителів", sim.NeedNames[n], int(w.NeedShare(n)*100+0.5))
+		}
+		body += "\n\nРізноманітна їжа: овочі, ягоди, хліб по черзі.\nВідпочинок: вогнище біля дому. Краса: квітники, статуї."
+		defer g.tooltip(dst, "Потреби жителів", body)
+	}
 }
 
 func fmtMinutes(m float64) string {
@@ -362,7 +380,12 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 	if h := sim.Builds[b.Kind].Housing; h > 0 && !b.Site {
 		add(func(y float64) float64 {
 			drawText(dst, fmt.Sprintf("Мешканців: %d / %d", g.w.Residents(b.ID), h), r.x+pad, y, 13*u, true, colInk, alignLeft)
-			return 24 * u
+			lines := g.w.HomeNeeds(b.ID)
+			if lines == "" {
+				return 24 * u
+			}
+			drawText(dst, lines, r.x+pad, y+22*u, 12*u, false, colInkSoft, alignLeft)
+			return 30*u + float64(countLines(lines))*16*u
 		})
 	}
 	if b.IsFlooded() {
@@ -714,22 +737,23 @@ func (g *Game) drawConfirmNew(dst *ebiten.Image) {
 	g.bigButton(dst, yes, "Так, почати заново", g.newGame)
 }
 
-const helpText = `Розбудуй поселення біля річки й переживи посухи.
+const helpText = `Розбудуй поселення біля річки, переживи посухи й зроби жителів щасливими.
 
 Жителі працюють у будівлях і переносять вантажі (кілька завжди вільні).
-Бракує рук — постав будівлю на паузу (P). Жителі їдять раз на 1.5 хв і п'ють раз на хвилину.
+Бракує рук — постав будівлю на паузу (P). Їдять раз на 1.5 хв, п'ють раз на хвилину.
 
 Вода й сезони
-· Річка тече із заходу від ратуші. Сезон дощів змінюється посухою (таймер угорі):
-  у посуху річка міліє, ґрунт висихає, ферми й ягоди не родять.
-· Насос (0) біля води дає питну воду — запасайте її на склади до посухи.
-· Гребля (H) тримає воду на рівень вище: загатіть річку, щоб вода лишилась на посуху.
-  Насип (J) — висока стіна, вода крізь неї не проходить.
-· Ферми (2) ростуть лише на вологому ґрунті (зеленуватий відтінок біля води).
+· Сезон дощів змінюється посухою (таймер угорі): річка міліє, ґрунт висихає.
+· Насос біля води дає питну воду — запасайте її до посухи.
+· Гребля тримає воду на рівень вище: загатіть річку. Насип воду не пропускає.
+· Ферми ростуть лише на вологому ґрунті біля води.
 
-Будівництво
-1-5 будинок, ферма, склад, вантажна станція, дослідницька станція
-6-9 лісоруб, лісник, збирач ягід, тартак · M бур · F піч · G збирач
+Добробут (0–5) — їжа, вода, різноманітна їжа, відпочинок, краса
+· Овочі (ферма), ягоди (збирач), хліб (пекарня) — їжте по черзі.
+· Вогнище біля домів — відпочинок; квітники й статуї — краса.
+· Вищий добробут — швидша робота (до ×1.3) і більше народжень.
+
+Панель будівництва: вкладки-категорії, [ ] — перемкнути, 1–9 — будівля у вкладці.
 Дослідження (T): матеріали зносять на станцію, потім дослідник працює.
 Вороги вимкнені — їх можна ввімкнути в меню (Esc).
 

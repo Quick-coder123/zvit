@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 8
+const SaveVersion = 9
 
 type saveFile struct {
 	Version   int
@@ -199,6 +199,9 @@ func Decode(in io.Reader) (*World, error) {
 	}
 	if sf.Version < 5 {
 		w.Free[KLab]++ // research now happens at a research station
+	}
+	if sf.Version < 9 {
+		w.Free[KCampfire]++ // wellbeing arrived
 	}
 	if sf.Version < 8 {
 		// rivers, droughts and thirst arrived

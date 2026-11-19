@@ -132,6 +132,14 @@ Top-down square tile of an earthen levee: packed beige-grey earth #A89C8C with a
 slightly raised rounded edges. Transparent background.
 ```
 
+### `campfire.png`, `flowerbed.png`, `statue.png`, `bakery.png`
+```
+Top-down square tile: [a small campfire ring of grey stones with orange flames | a small flower
+bed with pink, yellow and white flowers on green | a small grey stone statue of a person on a
+plinth | a small bakery roof with a round bread emblem]. Same flat style. Transparent background.
+```
+(Чотири окремі картинки.)
+
 ## 3. Виробництво
 
 ### `miner_base.png`: бур, корпус (2×2)
@@ -270,6 +278,8 @@ angry eyes near the right edge. Minimal style, not gory. Transparent background.
 | `item_wood.png` | `A short log #9C6B45 with a light round cut end` |
 | `item_planks.png` | `Three stacked light wooden planks #D9B27C` |
 | `item_water.png` | `A clear blue water drop #5DA9D6 with a white highlight` |
+| `item_berries.png` | `A small cluster of red berries #C0504D with a green leaf` |
+| `item_bread.png` | `A golden loaf of bread #D9A35B with three diagonal cuts` |
 
 ---
 
@@ -343,7 +353,7 @@ vector, centred, transparent background.
 
 **Ландшафт:** `ore_coal`, `ore_stone`, `ore_sand`
 
-**Поселення:** `house`, `farm`, `station`, `settler`, `site`, `tree`, `bush`, `lumber`, `forester`, `gatherer`, `sawmill`, `pump`, `dam`, `levee`
+**Поселення:** `house`, `farm`, `station`, `settler`, `site`, `tree`, `bush`, `lumber`, `forester`, `gatherer`, `sawmill`, `pump`, `dam`, `levee`, `campfire`, `flowerbed`, `statue`, `bakery`
 
 **Виробництво:** `miner_base`, `miner_head`, `furnace_off`, `furnace_on`, `assembler`, `chest`, `core`
 
@@ -351,10 +361,10 @@ vector, centred, transparent background.
 
 **Вороги:** `enemy_crawler`, `enemy_swarmer`, `enemy_brute`
 
-**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`, `item_food`, `item_wood`, `item_planks`, `item_water`
+**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`, `item_food`, `item_wood`, `item_planks`, `item_water`, `item_berries`, `item_bread`
 
 **Ефекти:** `fx_muzzle`, `fx_flame`, `fx_splat`, `fx_ruin`
 
 **Інтерфейс:** `icon`, `menu`, `wave` (необов'язково), `research`
 
-Лишилось 55 картинок. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
+Лишилось 61 картинка. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.

@@ -59,6 +59,7 @@ type Game struct {
 	pasting   bool
 	iconMode  bool // drawing toolbar icons, not the world
 	research  bool // research panel open
+	cat       int  // toolbar category
 	paused    bool // simulation stopped by the player (Space)
 	speed     int  // simulation ticks per frame: 1, 2 or 3
 	hudBottom float64
@@ -299,10 +300,16 @@ func (g *Game) handleInput() {
 
 	// hotkeys
 	if !ctrl {
-		for i, k := range toolList() {
-			if inpututil.IsKeyJustPressed(toolKeys[i]) {
+		for i, k := range toolCats[g.cat].kinds {
+			if inpututil.IsKeyJustPressed(ebiten.Key1 + ebiten.Key(i)) {
 				g.selectTool(k)
 			}
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyBracketRight) {
+			g.cat = (g.cat + 1) % len(toolCats)
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
+			g.cat = (g.cat + len(toolCats) - 1) % len(toolCats)
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.tool != sim.KNone {
@@ -357,6 +364,9 @@ func (g *Game) handleInput() {
 		g.pasting = false
 		if b := g.w.At(g.hover); b != nil && sim.Builds[b.Kind].Buildable {
 			g.tool, g.dir = b.Kind, b.Dir
+			if c := catOf(b.Kind); c >= 0 {
+				g.cat = c
+			}
 		} else {
 			g.tool = sim.KNone
 		}
