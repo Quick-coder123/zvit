@@ -29,23 +29,43 @@ const (
 	KLumber
 	KPump
 	KDam
+	KFarm
+	KSite
+	KWarehouse
+	KPlatform
+	KStairs
+	KBridge
+	KWaterTank
 )
 
 // Building occupies a square of tiles.
 type Building struct {
-	Kind Kind
-	X, Y int
-	Size int
+	Kind  Kind
+	X, Y  int
+	Size  int
+	Level int     // extra levels above the ground (stacked on platforms)
+	Dir   int     // 0..3 facing, for stairs
+	Prog  float64 // construction progress for sites
+}
+
+// Settler is a person walking on the map (prototype: positions only).
+type Settler struct {
+	X, Y, Z float64 // Z in levels
+	Carry   int     // 0 nothing, 1 log, 2 planks, 3 water, 4 food
+	Phase   float64
+	Dir     float64
 }
 
 type World struct {
-	Seed   int64
-	Height []uint8   // terrain level per tile
-	Water  []float32 // water depth per tile, in levels
-	Props  []Prop
-	Owner  []int16 // building index+1 per tile, 0 if free
-	Builds []*Building
-	Tick   uint64
+	Seed     int64
+	Height   []uint8   // terrain level per tile
+	Water    []float32 // water depth per tile, in levels
+	Props    []Prop
+	Owner    []int16 // building index+1 per tile, 0 if free
+	Builds   []*Building
+	Settlers []*Settler
+	Tick     uint64
+	Drought  bool
 
 	flux    []float32
 	springs []int
@@ -159,7 +179,7 @@ func (w *World) Place(k Kind, x, y, size int) bool {
 	for dy := 0; dy < size; dy++ {
 		for dx := 0; dx < size; dx++ {
 			i := Idx(x+dx, y+dy)
-			if w.Owner[i] != 0 || w.Height[i] != h || (w.Water[i] > 0.2 && k != KDam) {
+			if w.Owner[i] != 0 || w.Height[i] != h || (w.Water[i] > 0.2 && k != KDam && k != KBridge) {
 				return false
 			}
 		}
@@ -290,5 +310,22 @@ func (w *World) Update() {
 	w.Tick++
 	if w.Tick%6 == 0 {
 		w.StepWater()
+	}
+}
+
+// PlaceAt adds a building without checks (mock-up scenes).
+func (w *World) PlaceAt(b *Building) {
+	w.Builds = append(w.Builds, b)
+	id := int16(len(w.Builds))
+	for dy := 0; dy < b.Size; dy++ {
+		for dx := 0; dx < b.Size; dx++ {
+			if In(b.X+dx, b.Y+dy) {
+				i := Idx(b.X+dx, b.Y+dy)
+				if w.Owner[i] == 0 || b.Level > 0 {
+					w.Owner[i] = id
+				}
+				w.Props[i] = PropNone
+			}
+		}
 	}
 }

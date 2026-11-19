@@ -146,6 +146,51 @@ func (b *Batch) Box(x0, y0, z0, x1, y1, z1 float64, side, top color.RGBA) {
 	b.Poly(shade(top, 0, 0, 1), [3]float64{x0, y0, z1}, [3]float64{x1, y0, z1}, [3]float64{x1, y1, z1}, [3]float64{x0, y1, z1})
 }
 
+// Prism draws a gable roof running along the x axis.
+func (b *Batch) Prism(x0, y0, x1, y1, z, h float64, roof, gable color.RGBA) {
+	ym := (y0 + y1) / 2
+	cam := b.cam
+	if cam.facing(-1, 0) {
+		b.Poly(shade(gable, -1, 0, 0), [3]float64{x0, y0, z}, [3]float64{x0, y1, z}, [3]float64{x0, ym, z + h})
+	}
+	if cam.facing(1, 0) {
+		b.Poly(shade(gable, 1, 0, 0), [3]float64{x1, y0, z}, [3]float64{x1, y1, z}, [3]float64{x1, ym, z + h})
+	}
+	hw := (y1 - y0) / 2
+	order := []int{0, 1}
+	if !cam.facing(0, -1) {
+		order = []int{1, 0}
+	}
+	for _, k := range order {
+		if k == 0 {
+			b.Poly(shade(roof, 0, -h, hw), [3]float64{x0, y0, z}, [3]float64{x1, y0, z}, [3]float64{x1, ym, z + h}, [3]float64{x0, ym, z + h})
+		} else {
+			b.Poly(shade(roof, 0, h, hw), [3]float64{x0, y1, z}, [3]float64{x1, y1, z}, [3]float64{x1, ym, z + h}, [3]float64{x0, ym, z + h})
+		}
+	}
+}
+
+// Prismoid draws an n-sided vertical prism (a round tank).
+func (b *Batch) Prismoid(cx, cy, z0, r, h float64, n int, c color.RGBA) {
+	for k := 0; k < n; k++ {
+		a0 := float64(k) * 2 * math.Pi / float64(n)
+		a1 := float64(k+1) * 2 * math.Pi / float64(n)
+		am := (a0 + a1) / 2
+		if !b.cam.facing(math.Cos(am), math.Sin(am)) {
+			continue
+		}
+		p0x, p0y := cx+r*math.Cos(a0), cy+r*math.Sin(a0)
+		p1x, p1y := cx+r*math.Cos(a1), cy+r*math.Sin(a1)
+		b.Poly(shade(c, math.Cos(am), math.Sin(am), 0), [3]float64{p0x, p0y, z0}, [3]float64{p1x, p1y, z0}, [3]float64{p1x, p1y, z0 + h}, [3]float64{p0x, p0y, z0 + h})
+	}
+	pts := make([][3]float64, n)
+	for k := range pts {
+		a := float64(k) * 2 * math.Pi / float64(n)
+		pts[k] = [3]float64{cx + r*math.Cos(a), cy + r*math.Sin(a), z0 + h}
+	}
+	b.Poly(shade(c, 0, 0, 1), pts...)
+}
+
 // Pyramid draws an n-sided pyramid (n=4 roof, n=6..8 tree cone).
 func (b *Batch) Pyramid(cx, cy, z0, r, h float64, n int, rot float64, c color.RGBA) {
 	type face struct {
@@ -212,6 +257,9 @@ func (s *Scene) groundColor(w *world.World, x, y int) color.RGBA {
 	default:
 		c = mix(colGrass, colGrass2, hashf(x, y)*0.8)
 		c = mix(c, rgb(0xE8F0C8), float64(h-2)*0.06)
+		if w.Drought && !s.nearWater(w, x, y) {
+			c = mix(c, rgb(0xC9B06A), 0.6+0.2*hashf(y, x))
+		}
 	}
 	return c
 }
@@ -253,6 +301,18 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 	dst.Fill(colSky)
 	b := &Batch{dst: dst, cam: c}
 	t := float64(w.Tick) / 60
+	front := map[int][]*world.Building{}
+	for _, bd := range w.Builds {
+		fi := s.frontTile(bd)
+		front[fi] = append(front[fi], bd)
+	}
+	people := map[int][]*world.Settler{}
+	for _, st := range w.Settlers {
+		if world.In(int(st.X), int(st.Y)) {
+			k := world.Idx(int(st.X), int(st.Y))
+			people[k] = append(people[k], st)
+		}
+	}
 	for _, i := range s.visible(w) {
 		x, y := i%world.Size, i/world.Size
 		fx, fy := float64(x), float64(y)
@@ -338,10 +398,17 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 		}
 
 		// objects
-		if bd := w.BuildingAt(x, y); bd != nil {
-			if s.isFront(bd, x, y) {
-				drawBuilding(b, bd, top, t)
+		if bs := front[i]; len(bs) > 0 {
+			sort.Slice(bs, func(a, c int) bool { return bs[a].Level < bs[c].Level })
+			for _, bd := range bs {
+				base := float64(int(w.Height[world.Idx(bd.X, bd.Y)])+bd.Level) * LevelH
+				drawBuilding(b, bd, base, t)
 			}
+		}
+		for _, st := range people[i] {
+			drawSettler(b, st, t)
+		}
+		if w.Owner[i] != 0 {
 			continue
 		}
 		switch w.Props[i] {
@@ -371,20 +438,35 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 	b.flush()
 }
 
-// isFront reports whether tile (x,y) is the nearest footprint tile of a
-// building, so it is drawn after the rest of its footprint.
-func (s *Scene) isFront(bd *world.Building, x, y int) bool {
+// frontTile is the footprint tile nearest to the viewer; a building is
+// drawn there, after the rest of its footprint.
+func (s *Scene) frontTile(bd *world.Building) int {
 	c := &s.Cam
-	best, bx, by := -1e9, 0, 0
+	best, bi := -1e9, 0
 	for dy := 0; dy < bd.Size; dy++ {
 		for dx := 0; dx < bd.Size; dx++ {
-			_, r := c.rot(float64(bd.X+dx)+0.5-c.X, float64(bd.Y+dy)+0.5-c.Y)
+			x, y := bd.X+dx, bd.Y+dy
+			if !world.In(x, y) {
+				continue
+			}
+			_, r := c.rot(float64(x)+0.5-c.X, float64(y)+0.5-c.Y)
 			if r > best {
-				best, bx, by = r, bd.X+dx, bd.Y+dy
+				best, bi = r, world.Idx(x, y)
 			}
 		}
 	}
-	return bx == x && by == y
+	return bi
+}
+
+func (s *Scene) nearWater(w *world.World, x, y int) bool {
+	for dy := -4; dy <= 4; dy++ {
+		for dx := -4; dx <= 4; dx++ {
+			if world.In(x+dx, y+dy) && w.Water[world.Idx(x+dx, y+dy)] > 0.1 && dx*dx+dy*dy <= 16 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hashf(x, y int) float64 {
@@ -420,6 +502,93 @@ func drawBuilding(b *Batch, bd *world.Building, base float64, t float64) {
 		b.Box(x0+s/2-0.3, y0+s/2-0.04, base+0.8+arm*0.3, x0+s/2+0.3, y0+s/2+0.04, base+0.86+arm*0.3, rgb(0x6B4F3A), rgb(0x7A5536))
 	case world.KDam:
 		b.Box(x0, y0+0.2, base, x0+s, y0+s-0.2, base+LevelH*1.0, rgb(0x8C6B4A), rgb(0x9C7A55))
+	case world.KFarm:
+		b.Box(x0+0.04, y0+0.04, base, x0+s-0.04, y0+s-0.04, base+0.04, rgb(0x8A6A48), rgb(0x8A6A48))
+		for r := 0; r < 3; r++ {
+			for k := 0; k < 3; k++ {
+				px, py := x0+0.2+float64(k)*0.3, y0+0.2+float64(r)*0.3
+				hgt := 0.12 + 0.03*math.Sin(t*2+px+py)
+				col := rgb(0x7FB35A)
+				if (r+k)%3 == 0 {
+					col = rgb(0xD9B44A)
+				}
+				b.Pyramid(px, py, base+0.04, 0.09, hgt+0.12, 4, 0.3, col)
+			}
+		}
+	case world.KSite:
+		wood := rgb(0xC8A06A)
+		for _, p := range [][2]float64{{0.12, 0.12}, {s - 0.12, 0.12}, {0.12, s - 0.12}, {s - 0.12, s - 0.12}} {
+			b.Box(x0+p[0]-0.04, y0+p[1]-0.04, base, x0+p[0]+0.04, y0+p[1]+0.04, base+0.8, wood, wood)
+		}
+		b.Box(x0+0.16, y0+0.16, base, x0+s-0.16, y0+s-0.16, base+0.8*bd.Prog, rgb(0xE8DCC2), rgb(0xD8CCB2))
+		b.Box(x0+0.08, y0+0.08, base+0.78, x0+s-0.08, y0+0.16, base+0.84, wood, wood)
+		b.Box(x0+0.08, y0+s-0.16, base+0.78, x0+s-0.08, y0+s-0.08, base+0.84, wood, wood)
+	case world.KWarehouse:
+		b.Box(x0+0.1, y0+0.1, base, x0+s-0.1, y0+s-0.1, base+0.7, rgb(0xB08A5A), rgb(0xB08A5A))
+		b.Prism(x0+0.02, y0+0.02, x0+s-0.02, y0+s-0.02, base+0.7, 0.55, rgb(0x7A5536), rgb(0xB08A5A))
+	case world.KPlatform:
+		wood := rgb(0xA5794D)
+		for _, p := range [][2]float64{{0.1, 0.1}, {s - 0.1, 0.1}, {0.1, s - 0.1}, {s - 0.1, s - 0.1}} {
+			b.Box(x0+p[0]-0.06, y0+p[1]-0.06, base, x0+p[0]+0.06, y0+p[1]+0.06, base+LevelH-0.08, wood, wood)
+		}
+		b.Box(x0, y0, base+LevelH-0.08, x0+s, y0+s, base+LevelH, wood, rgb(0xC8A06A))
+	case world.KStairs:
+		n := 5
+		for k := 0; k < n; k++ {
+			f0, f1 := float64(k)/float64(n), float64(k+1)/float64(n)
+			z := base + LevelH*f1
+			switch bd.Dir {
+			case 0:
+				b.Box(x0+0.15, y0+1-f1, base, x0+0.85, y0+1-f0, z, rgb(0xA5794D), rgb(0xC8A06A))
+			case 1:
+				b.Box(x0+f0, y0+0.15, base, x0+f1, y0+0.85, z, rgb(0xA5794D), rgb(0xC8A06A))
+			case 2:
+				b.Box(x0+0.15, y0+f0, base, x0+0.85, y0+f1, z, rgb(0xA5794D), rgb(0xC8A06A))
+			default:
+				b.Box(x0+1-f1, y0+0.15, base, x0+1-f0, y0+0.85, z, rgb(0xA5794D), rgb(0xC8A06A))
+			}
+		}
+	case world.KBridge:
+		wood := rgb(0xA5794D)
+		deck := base + LevelH*bd.Prog
+		b.Box(x0+0.45, y0+0.4, base-1.4, x0+0.55, y0+0.6, deck, wood, wood)
+		b.Box(x0, y0+0.05, deck-0.08, x0+s, y0+s-0.05, deck, wood, rgb(0xC8A06A))
+		b.Box(x0, y0+0.05, deck, x0+s, y0+0.1, deck+0.25, wood, wood)
+		b.Box(x0, y0+s-0.1, deck, x0+s, y0+s-0.05, deck+0.25, wood, wood)
+	case world.KWaterTank:
+		b.Prismoid(x0+s/2, y0+s/2, base, 0.38*s, 0.9, 8, rgb(0x9C7A55))
+		b.Prismoid(x0+s/2, y0+s/2, base+0.9, 0.33*s, 0.02, 8, rgb(0x4F9FD0))
+	}
+}
+
+// drawSettler draws a small low-poly person, bobbing as they walk.
+func drawSettler(b *Batch, st *world.Settler, t float64) {
+	z := st.Z * LevelH
+	bob := 0.03 * math.Abs(math.Sin(t*8+st.Phase))
+	x, y := st.X, st.Y
+	skin, tunic := rgb(0xF1D2B0), rgb(0x4FA3A5)
+	switch st.Carry {
+	case 1:
+		tunic = rgb(0x7A9A4A)
+	case 3:
+		tunic = rgb(0x5E86C8)
+	case 4:
+		tunic = rgb(0xC9673F)
+	}
+	leg := 0.04 * math.Sin(t*8+st.Phase)
+	b.Box(x-0.06+leg, y-0.04, z, x-0.01+leg, y+0.04, z+0.16, rgb(0x5A4636), rgb(0x5A4636))
+	b.Box(x+0.01-leg, y-0.04, z, x+0.06-leg, y+0.04, z+0.16, rgb(0x5A4636), rgb(0x5A4636))
+	b.Box(x-0.09, y-0.06, z+0.16+bob, x+0.09, y+0.06, z+0.38+bob, tunic, tunic)
+	b.Box(x-0.07, y-0.07, z+0.38+bob, x+0.07, y+0.07, z+0.52+bob, skin, rgb(0x6B4A2E))
+	switch st.Carry {
+	case 1:
+		b.Box(x-0.22, y-0.05, z+0.4+bob, x+0.22, y+0.05, z+0.48+bob, rgb(0x9C6B45), rgb(0x9C6B45))
+	case 2:
+		b.Box(x-0.2, y-0.07, z+0.4+bob, x+0.2, y+0.07, z+0.45+bob, rgb(0xD9B27C), rgb(0xE3C79B))
+	case 3:
+		b.Box(x+0.08, y-0.04, z+0.12+bob, x+0.16, y+0.04, z+0.24+bob, rgb(0x8C99A6), rgb(0x4F9FD0))
+	case 4:
+		b.Box(x-0.08, y-0.1, z+0.28+bob, x+0.08, y+0.1, z+0.36+bob, rgb(0xC8A97E), rgb(0xC0504D))
 	}
 }
 

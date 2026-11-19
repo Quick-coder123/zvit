@@ -42,6 +42,7 @@ type game struct {
 	pan    bool
 	shot   string
 	frames int
+	mock   string
 }
 
 func (g *game) Layout(ow, oh int) (int, int) {
@@ -142,6 +143,11 @@ func (g *game) Update() error {
 func (g *game) Draw(screen *ebiten.Image) {
 	g.scene.Draw(screen, g.w)
 	u := g.ui
+	if g.mock != "" {
+		drawMockUI(screen, u, g.mock)
+		g.saveShot(screen)
+		return
+	}
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(14*u, 12*u)
 	op.ColorScale.ScaleWithColor(color.RGBA{0x2E, 0x34, 0x40, 0xFF})
@@ -153,6 +159,10 @@ func (g *game) Draw(screen *ebiten.Image) {
 	}
 	msg := fmt.Sprintf("Потік 3D — прототип · %.0f FPS\nWASD — рух · Q/E — поворот · R/F або ПКМ — нахил і поворот · колесо — зум%s", ebiten.ActualFPS(), hover)
 	text.Draw(screen, msg, &text.GoTextFace{Source: font, Size: 14 * u}, op)
+	g.saveShot(screen)
+}
+
+func (g *game) saveShot(screen *ebiten.Image) {
 	if g.shot != "" {
 		g.frames--
 		if g.frames == 0 {
@@ -174,11 +184,34 @@ func main() {
 	yaw := flag.Float64("debug-yaw", 0.5, "")
 	pitch := flag.Float64("debug-pitch", 0.95, "")
 	scale := flag.Float64("debug-scale", 34, "")
+	scene := flag.String("debug-scene", "", "")
 	flag.Parse()
 
 	w := world.New(7)
-	g := &game{w: w, shot: *shot, frames: 4}
+	g := &game{w: w, shot: *shot, frames: 4, mock: *scene}
 	cx, cy := int(w.RiverX(48))+8, 48
+	if *scene != "" {
+		buildTown(w, cx, cy)
+		damRiver(w, cy+10)
+		switch *scene {
+		case "drought":
+			drought(w, cy+10)
+		}
+		tx, ty := float64(cx)+1, float64(cy)+1
+		if *scene == "levels" {
+			lx, ly := buildLevels(w, int(w.RiverX(float64(cy+12)))+5, cy+12)
+			tx, ty = float64(lx)-1, float64(ly)+2
+		}
+		c := &g.scene.Cam
+		c.X, c.Y, c.Scale, c.Yaw, c.Pitch = tx, ty, *scale, *yaw, *pitch
+		c.Z = float64(w.Height[world.Idx(int(tx), int(ty))]) * view.LevelH
+		g.yawTo = c.Yaw
+		ebiten.SetWindowSize(1280, 800)
+		if err := ebiten.RunGame(g); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	// a few sample buildings next to the river
 	w.Place(world.KHall, cx, cy-1, 2)
 	w.Place(world.KHouse, cx+3, cy-2, 1)
