@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 3
+const SaveVersion = 4
 
 type saveFile struct {
 	Version   int
@@ -32,6 +32,12 @@ type saveFile struct {
 	Peaceful   bool
 	Ruins      []Spec
 	Kills      int
+
+	// v4
+	Settlers    []*Settler
+	NextSettler int32
+	WanderTimer float32
+	Deaths      int
 }
 
 // Encode writes the world in the save format.
@@ -39,7 +45,8 @@ func (w *World) Encode(out io.Writer) error {
 	zw := gzip.NewWriter(out)
 	sf := saveFile{Version: SaveVersion, Seed: w.Seed, Tick: w.Tick, NextID: w.NextID, Stock: w.Stock[:],
 		Free: w.Free[:], Researched: w.Researched, Enemies: w.Enemies, Wave: w.Wave, NextWave: w.NextWave,
-		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills}
+		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills,
+		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths}
 	for _, id := range w.Order() {
 		sf.Buildings = append(sf.Buildings, w.Buildings[id])
 	}
@@ -64,7 +71,8 @@ func Decode(in io.Reader) (*World, error) {
 	}
 	w := &World{Seed: sf.Seed, Tick: sf.Tick, NextID: sf.NextID, Buildings: map[int32]*Building{},
 		Researched: sf.Researched, Enemies: sf.Enemies, Wave: sf.Wave, NextWave: sf.NextWave,
-		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills}
+		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills,
+		Settlers: sf.Settlers, NextSettler: sf.NextSettler, WanderTimer: sf.WanderTimer, Deaths: sf.Deaths}
 	copy(w.Stock[:], sf.Stock)
 	copy(w.Free[:], sf.Free)
 	if w.Researched == nil {
@@ -110,7 +118,41 @@ func Decode(in io.Reader) (*World, error) {
 			}
 		}
 	}
+	if sf.Version < 4 {
+		// Conveyor logistics were replaced by settlers: refund the belts and
+		// friends, and bring people to an existing town.
+		for id, b := range w.Buildings {
+			if b.Kind.Legacy() {
+				for _, c := range Builds[b.Kind].Cost {
+					w.Stock[c.Item] += c.N
+				}
+				delete(w.Buildings, id)
+			}
+		}
+		var ruins []Spec
+		for _, r := range w.Ruins {
+			if !r.Kind.Legacy() {
+				ruins = append(ruins, r)
+			}
+		}
+		w.Ruins = ruins
+		w.Free[KHouse] += 3
+		w.Free[KFarm]++
+		w.Stock[Food] += 60
+		if w.Researched["chest"] || w.Researched["assembler"] {
+			w.Researched["station"] = true
+		}
+	}
 	w.initCaches()
+	if sf.Version < 4 {
+		if c := w.Core(); c != nil {
+			for i := 0; i < 6; i++ {
+				s := w.spawnSettler(c)
+				s.X += float64(i%3) - 1
+			}
+		}
+	}
+	w.rebuildBookkeeping()
 	for _, b := range w.Buildings {
 		if b.Kind.Base() == KMiner {
 			b.MinerItem, b.MinerTiles = w.minerOre(b.Pos, b.Size())

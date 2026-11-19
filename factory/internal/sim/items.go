@@ -18,6 +18,7 @@ const (
 	Gear
 	Wire
 	Ammo
+	Food
 	ItemCount
 )
 
@@ -32,6 +33,7 @@ const (
 	ShapeGear               // ring
 	ShapeCoil               // small coil
 	ShapeAmmo               // cartridge
+	ShapeFood               // grain sack
 )
 
 type ItemDef struct {
@@ -55,6 +57,7 @@ var Items = [ItemCount]ItemDef{
 	Gear:        {"Шестерня", 0x8C99A6, ShapeGear},
 	Wire:        {"Дріт", 0xD9894F, ShapeCoil},
 	Ammo:        {"Набої", 0xC9A227, ShapeAmmo},
+	Food:        {"Їжа", 0xC9B458, ShapeFood},
 }
 
 // Stack is an amount of one item.

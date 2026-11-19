@@ -13,18 +13,18 @@ import (
 
 // toolbar groups; the hotkey for each slot is listed in toolKeys.
 var toolGroups = [][]sim.Kind{
-	{sim.KBelt, sim.KTunnel, sim.KSplitter, sim.KMerger, sim.KSorter},
-	{sim.KMiner, sim.KFurnace, sim.KAssembler, sim.KChest},
+	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation},
+	{sim.KMiner, sim.KFurnace, sim.KAssembler},
 	{sim.KWall, sim.KFlamer, sim.KTurret},
 }
 
 var toolKeys = []ebiten.Key{
-	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
-	ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
+	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4,
+	ebiten.Key5, ebiten.Key6, ebiten.Key7,
 	ebiten.KeyZ, ebiten.KeyX, ebiten.KeyC,
 }
 
-var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "Z", "X", "C"}
+var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "Z", "X", "C"}
 
 func toolList() []sim.Kind {
 	var out []sim.Kind
@@ -142,7 +142,7 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 
 func (g *Game) affordable(cost []sim.Stack) bool {
 	for _, c := range cost {
-		if g.w.Stock[c.Item] < c.N {
+		if g.stock[c.Item] < c.N {
 			return false
 		}
 	}
@@ -261,7 +261,7 @@ func (g *Game) drawResearch(dst *ebiten.Image) {
 		default:
 			x := cr.x + 12*u
 			for _, c := range t.Cost {
-				have := g.w.Stock[c.Item] >= c.N
+				have := g.stock[c.Item] >= c.N
 				drawItem(dst, c.Item, float32(x+8*u), float32(y+10*u), float32(15*u))
 				tc := colInk
 				if !have {
@@ -350,11 +350,11 @@ func (g *Game) rebuild() {
 	built, left := g.w.RebuildRuins()
 	switch {
 	case built == 0 && left > 0:
-		g.say("Бракує ресурсів, щоб відбудувати")
+		g.say("Ці будівлі ще закриті в дослідженнях")
 	case left > 0:
 		g.say("Відбудовано %d, ще %d чекають на ресурси", built, left)
 	default:
-		g.say("Відбудовано: %d", built)
+		g.say("Будмайданчиків на місці руїн: %d", built)
 	}
 }
 

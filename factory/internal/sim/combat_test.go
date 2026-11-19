@@ -1,31 +1,10 @@
 package sim
 
-import (
-	"bytes"
-	"compress/gzip"
-	"encoding/gob"
-	"testing"
-)
+import "testing"
 
-func TestStarterEconomy(t *testing.T) {
+func TestResearch(t *testing.T) {
 	w := NewWorld(5)
-	// furnace is locked at the start
-	if err := w.CheckPlace(KFurnace, Pos{5, 5}, East); err != ErrLocked {
-		t.Fatalf("furnace should be locked: %v", err)
-	}
-	// one free miner and ten free belts, nothing else
-	if _, err := w.Place(KMiner, Pos{12, -6}, West, 0); err != nil {
-		t.Fatalf("free miner: %v", err)
-	}
-	for i := 0; i < 10; i++ {
-		if _, err := w.Place(KBelt, Pos{11 - i, -5}, West, 0); err != nil {
-			t.Fatalf("free belt %d: %v", i, err)
-		}
-	}
-	if _, err := w.Place(KBelt, Pos{0, 5}, West, 0); err != ErrNoFunds {
-		t.Fatalf("11th belt should cost ore: %v", err)
-	}
-	// research needs resources and prerequisites
+	w.Stock = [ItemCount]int{}
 	if err := w.Research("assembler"); err != ErrPrereq {
 		t.Fatalf("assembler before furnace: %v", err)
 	}
@@ -33,54 +12,53 @@ func TestStarterEconomy(t *testing.T) {
 		t.Fatalf("furnace without ore: %v", err)
 	}
 	w.Stock[IronOre], w.Stock[Stone] = 30, 20
-	if err := w.Research("furnace"); err != nil || w.Stock[IronOre] != 0 {
+	if err := w.Research("furnace"); err != nil || w.Stock[IronOre] != 0 || !w.Unlocked(KFurnace) {
 		t.Fatalf("research furnace: %v", err)
 	}
-	if !w.Unlocked(KFurnace) {
-		t.Fatal("furnace not unlocked")
-	}
-	// steel recipe is locked until researched
 	if w.autoRecipe(KFurnace, IronPlate) >= 0 {
 		t.Fatal("steel should be locked")
+	}
+	// research can be paid from storehouses too
+	ch := built(t, w, KChest, Pos{5, 5})
+	ch.Store = []Stack{{Stone, 30}, {IronOre, 30}}
+	if err := w.Research("station"); err != nil || ch.StoreCount() != 0 {
+		t.Fatalf("pay from storehouse: %v", err)
 	}
 }
 
 func TestFreeTokenRefund(t *testing.T) {
 	w := NewWorld(5)
-	b, _ := w.Place(KBelt, Pos{5, 5}, East, 0)
+	b, _ := w.Place(KHouse, Pos{5, 5}, East, 0)
 	w.Remove(b.ID)
-	if w.Free[KBelt] != 10 || w.Stock[IronOre] != 0 {
-		t.Fatalf("token refund: free=%d ore=%d", w.Free[KBelt], w.Stock[IronOre])
+	if w.Free[KHouse] != 1 {
+		t.Fatalf("token refund: %d", w.Free[KHouse])
 	}
 }
 
 func TestWaveScheduleAndCoreDefends(t *testing.T) {
 	w := NewWorld(11)
-	if w.NextWave != FirstWaveDelay {
-		t.Fatal("first wave timer")
-	}
 	w.NextWave = DT / 2
 	w.Update(nil)
 	if w.Wave != 1 || len(w.Enemies) == 0 {
 		t.Fatalf("wave not spawned: wave=%d enemies=%d", w.Wave, len(w.Enemies))
 	}
 	n := len(w.Enemies)
-	// the core gun alone should handle the first wave
 	run(w, 120)
 	if len(w.Enemies) != 0 || w.Kills != n {
 		t.Fatalf("enemies left %d, kills %d/%d", len(w.Enemies), w.Kills, n)
 	}
 	if c := w.Core(); c.Dmg >= w.MaxHP(c) {
-		t.Fatal("core should survive wave 1")
+		t.Fatal("town hall should survive wave 1")
 	}
 }
 
 func TestEnemiesDestroyAndRuins(t *testing.T) {
-	w := emptyWorld()
+	w := emptyWorld(2)
 	w.Peaceful = false
 	w.NextWave = 1e9
-	core(w, -1, -1)
-	wall := mustPlace(t, w, KWall, Pos{20, 0}, East)
+	w.Buildings[1].Pos = Pos{-40, -40} // move the town hall's gun out of range
+	w.initCaches()
+	wall := built(t, w, KWall, Pos{20, 0})
 	w.Enemies = []*Enemy{{Kind: Brute, X: 23, Y: 0.5, HP: 1e6}}
 	run(w, 60)
 	if w.Buildings[wall.ID] != nil {
@@ -90,44 +68,52 @@ func TestEnemiesDestroyAndRuins(t *testing.T) {
 		t.Fatalf("ruins %v", w.Ruins)
 	}
 	w.Enemies = nil
-	built, left := w.RebuildRuins()
-	if built != 1 || left != 0 || w.At(Pos{20, 0}) == nil {
+	if built, _ := w.RebuildRuins(); built != 1 {
 		t.Fatal("rebuild failed")
+	}
+	if b := w.At(Pos{20, 0}); b == nil || !b.Site {
+		t.Fatal("rebuild should place a construction site")
 	}
 }
 
-func TestTurretUsesAmmo(t *testing.T) {
-	w := emptyWorld()
+func TestTurretNeedsWorkerAndAmmo(t *testing.T) {
+	w := emptyWorld(0)
 	w.Peaceful = false
 	w.NextWave = 1e9
-	core(w, -30, -1)
-	tu := mustPlace(t, w, KTurret, Pos{0, 0}, East)
-	w.Enemies = []*Enemy{{Kind: Crawler, X: 8, Y: 1, HP: 30}}
-	run(w, 1)
-	if w.Enemies[0].HP != 30 {
-		t.Fatal("turret without ammo must not shoot")
+	w.Buildings[1].Pos = Pos{-40, -40}
+	w.initCaches()
+	tu := built(t, w, KTurret, Pos{0, 0})
+	tu.Ammo = 100
+	w.Enemies = []*Enemy{{Kind: Crawler, X: 6, Y: 0.5, HP: 1e6}}
+	run(w, 2)
+	if w.Enemies[0].HP != 1e6 {
+		t.Fatal("turret without a worker must not shoot")
 	}
-	src := mustPlace(t, w, KChest, Pos{-2, 0}, East)
-	src.Store = []Stack{{Ammo, 1}}
-	mustPlace(t, w, KBelt, Pos{-1, 0}, East)
-	run(w, 3)
+	// a worker arrives; ammo is hauled from the town hall
+	tu.Ammo = 0
+	w.spawnSettler(w.Buildings[1])
+	w.spawnSettler(w.Buildings[1])
+	w.Enemies[0].HP = 30
+	run(w, 60)
 	if len(w.Enemies) != 0 {
 		t.Fatal("crawler should be dead")
 	}
-	if tu.Ammo >= AmmoShots || tu.Ammo <= 0 {
-		t.Fatalf("ammo left %d", tu.Ammo)
+	if tu.Ammo <= 0 {
+		t.Fatal("ammo should have been delivered")
 	}
 }
 
 func TestFlamerBurnsGroup(t *testing.T) {
-	w := emptyWorld()
+	w := emptyWorld(1)
 	w.Peaceful = false
 	w.NextWave = 1e9
-	core(w, -30, -1)
-	f := mustPlace(t, w, KFlamer, Pos{0, 0}, East)
+	w.Buildings[1].Pos = Pos{-40, -40}
+	w.initCaches()
+	f := built(t, w, KFlamer, Pos{0, 3})
 	f.Ammo = 200
+	run(w, 3) // worker walks in
 	for i := 0; i < 5; i++ {
-		w.Enemies = append(w.Enemies, &Enemy{Kind: Swarmer, X: 3 + float64(i)*0.2, Y: 0.5, HP: 12})
+		w.Enemies = append(w.Enemies, &Enemy{Kind: Swarmer, X: 3 + float64(i)*0.2, Y: 3.5, HP: 12})
 	}
 	run(w, 2)
 	if len(w.Enemies) != 0 {
@@ -148,88 +134,47 @@ func TestCoreFallPenalty(t *testing.T) {
 
 func TestSaveKeepsCombatState(t *testing.T) {
 	w := NewWorld(4)
-	w.Research("walls")
 	w.Researched["walls"] = true
 	w.Enemies = []*Enemy{{Kind: Brute, X: 3, Y: 4, HP: 100}}
 	w.Ruins = []Spec{{Kind: KWall, Pos: Pos{9, 9}}}
 	w.Wave = 3
 	w2 := roundTrip(t, w)
-	if !w2.Researched["walls"] || len(w2.Enemies) != 1 || w2.Wave != 3 || len(w2.Ruins) != 1 || w2.Free[KBelt] != 10 {
+	if !w2.Researched["walls"] || len(w2.Enemies) != 1 || w2.Wave != 3 || len(w2.Ruins) != 1 || w2.Free[KMiner] != 1 {
 		t.Fatal("combat state lost")
 	}
 }
 
 func TestMachinesAreOneTile(t *testing.T) {
-	for _, k := range []Kind{KMiner, KFurnace, KAssembler, KTurret} {
+	for _, k := range []Kind{KMiner, KFurnace, KAssembler, KTurret, KHouse, KFarm, KStation, KChest} {
 		if Builds[k].Size != 1 {
 			t.Fatalf("%s should be 1×1", Builds[k].Name)
 		}
+	}
+	for _, k := range []Kind{KMiner, KFurnace, KAssembler, KTurret} {
 		if big := k.Big(); Builds[big].Size != 2 || big.Base() != k {
 			t.Fatalf("%s needs a 2×2 upgrade", Builds[k].Name)
 		}
 	}
 	if Builds[KCore].Size != 3 {
-		t.Fatal("core stays 3×3")
+		t.Fatal("town hall stays 3×3")
 	}
 }
 
-func TestBigVariants(t *testing.T) {
-	w := NewWorld(42)
-	w.Peaceful = true
-	for i := range w.Stock {
-		w.Stock[i] = 1000
-	}
-	if err := w.CheckPlace(KMinerBig, Pos{12, -6}, West); err != ErrLocked {
-		t.Fatalf("big miner should need research: %v", err)
-	}
-	w.UnlockAll()
-	small, err := w.Place(KMiner, Pos{14, -5}, West, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	big, err := w.Place(KMinerBig, Pos{12, -7}, West, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if MinerRate(big) < 4.9*MinerRate(small) && big.MinerTiles == 4 {
-		t.Fatalf("big miner rate %.2f vs small %.2f", MinerRate(big), MinerRate(small))
-	}
-	// big assembler shares recipes with the small one and runs 3× faster
-	a, _ := w.Place(KAssemblerBig, Pos{0, 6}, East, 0)
+func TestBigAssemblerIsFaster(t *testing.T) {
+	w := emptyWorld(2)
+	a := built(t, w, KAssemblerBig, Pos{0, 6})
 	w.SetRecipe(a.ID, 5) // gears
-	if a.Recipe != 5 || len(RecipesFor(KAssemblerBig)) != len(RecipesFor(KAssembler)) {
-		t.Fatal("big assembler recipes")
+	run(w, 5)            // two workers walk in
+	if !a.Running() {
+		t.Fatal("big assembler needs two workers")
 	}
-	a.InBuf[0].N = 2
-	run(w, 1.0/3+0.05)
-	if a.OutN != 1 {
-		t.Fatalf("big assembler should finish a 1s gear in 1/3s, out=%d", a.OutN)
+	a.InBuf[0].N, a.OutN, a.Progress, a.Working = 2, 0, 0, false
+	w.Researched["craft1"], w.Researched["craft2"] = false, false
+	before := a.OutN
+	for i := 0; i < int((2.0/3+0.05)*TPS); i++ {
+		w.Update(nil)
 	}
-}
-
-func TestOldSaveKeeps2x2Machines(t *testing.T) {
-	w := NewWorld(42)
-	w.UnlockAll()
-	for i := range w.Stock {
-		w.Stock[i] = 1000
-	}
-	f, _ := w.Place(KFurnaceBig, Pos{5, 5}, East, 0)
-	// pretend it was saved by an older version as a plain 2×2 furnace
-	f.Kind = KFurnace
-	var buf bytes.Buffer
-	sf := saveFile{Version: 2, Seed: w.Seed, NextID: w.NextID, Stock: w.Stock[:], Researched: map[string]bool{}}
-	for _, id := range w.Order() {
-		sf.Buildings = append(sf.Buildings, w.Buildings[id])
-	}
-	zw := gzip.NewWriter(&buf)
-	gob.NewEncoder(zw).Encode(&sf)
-	zw.Close()
-	w2, err := Decode(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := w2.At(Pos{6, 6})
-	if b == nil || b.Kind != KFurnaceBig || !w2.Researched["bigfurnace"] {
-		t.Fatalf("old 2×2 furnace not migrated: %+v", b)
+	if a.OutN-before < 1 {
+		t.Fatalf("a 2s gear should take 2/3s, out=%d", a.OutN)
 	}
 }

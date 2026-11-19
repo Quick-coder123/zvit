@@ -314,10 +314,7 @@ func (w *World) Damage(b *Building, amount float32) {
 		return
 	}
 	w.Ruins = append(w.Ruins, SpecOf(b))
-	w.mark(b, 0)
-	delete(w.Buildings, b.ID)
-	w.dirty = true
-	w.refreshAround(b.Pos)
+	w.unplace(b)
 	w.notice("Зруйновано: %s", Builds[b.Kind].Name)
 }
 
@@ -411,16 +408,16 @@ func (w *World) stepFlamer(b *Building) {
 	}
 }
 
-// RebuildRuins re-places destroyed buildings as far as resources allow.
+// RebuildRuins puts construction sites back where buildings were destroyed.
 func (w *World) RebuildRuins() (built, left int) {
 	var keep []Spec
 	for _, sp := range w.Ruins {
-		if w.At(sp.Pos) != nil && !(sp.Kind == KBelt) {
+		if w.At(sp.Pos) != nil || sp.Kind.Legacy() {
 			continue // something else was built there; forget the ruin
 		}
 		if _, err := w.PlaceSpec(sp, 0); err == nil {
 			built++
-		} else if err == ErrNoFunds || err == ErrLocked {
+		} else if err == ErrLocked {
 			keep = append(keep, sp)
 		}
 	}

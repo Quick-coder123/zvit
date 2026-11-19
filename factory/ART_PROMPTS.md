@@ -61,63 +61,40 @@ specks #FFF6D8 and small ripples. Seamless tileable, top-down, fills the whole s
 
 ---
 
-## 2. Логістика (1 клітинка)
+## 2. Поселення
 
-### `belt.png`: конвеєр
+### `house.png`: будинок
 ```
-One straight conveyor belt segment seen from directly above, running left-to-right,
-occupying the full width of the square and about 80% of its height. Light warm grey
-rubber belt #D8D1C4 with thin darker side rails #C2B9A9 at top and bottom edges.
-NO arrows or chevrons on it (they are animated by the game). Transparent background.
-```
-
-### `belt_curve.png`: поворот конвеєра
-```
-A conveyor belt that turns 90 degrees, seen from directly above: it enters from the LEFT
-edge and exits through the BOTTOM edge, following a smooth quarter-circle. Same width,
-colours and rails as a straight belt (#D8D1C4 belt, #C2B9A9 rails). No arrows.
+Small cosy house seen strictly from directly above (top-down, roof only): a square roof of
+warm terracotta tiles #C97B4A with a ridge line, a tiny chimney, soft rounded edges.
 Transparent background.
 ```
 
-### `tunnel_in.png`: вхід тунелю
+### `farm.png`: ферма
 ```
-Entrance of an underground conveyor tunnel, top-down. The left half is a short piece of
-light grey conveyor belt #D8D1C4; the right half is a solid rounded slate block #5E6B78
-with a dark opening #2E3440 facing left where the belt disappears inside. Small light
-arrow on the block pointing right. Transparent background.
-```
-
-### `tunnel_out.png`: вихід тунелю
-```
-Exit of an underground conveyor tunnel, mirror of the entrance, top-down: the LEFT half is
-the rounded slate block #5E6B78 with its dark opening facing right, the right half is a short
-conveyor belt piece #D8D1C4 leaving it. Small light arrow pointing right. Transparent background.
-```
-
-### `splitter.png`: розгалужувач
-```
-Small square logistics machine, top-down, off-white body #FBF9F4 with lilac outline #8E7CC3,
-sitting on a light grey belt pad. On top, three arrows from the centre: one up, one right,
-one down, the side arrows lilac #8E7CC3, the right arrow dark. Clean and iconic.
+A small square crop field seen from directly above: rows of green sprouts #8DB360 with
+golden grain heads #C9A227 on light soil #E8D9A0, a tiny wooden corner post.
 Transparent background.
 ```
 
-### `merger.png`: об'єднувач
+### `station.png`: вантажна станція
 ```
-Small square logistics machine, top-down, off-white body #FBF9F4 with soft green outline
-#6FAE7B, on a light grey belt pad. Three green arrows pointing INTO the centre (from top,
-left and bottom) and one dark arrow pointing out to the right. Transparent background.
-```
-
-### `sorter.png`: сортер
-```
-Small square logistics machine, top-down, off-white body #FBF9F4 with warm tan outline
-#D4A373, on a light grey belt pad. Empty round slot in the centre (the game draws the
-filtered item there), small tan arrows pointing up and down, a dark arrow pointing right.
-Transparent background.
+Small cargo depot seen from directly above: a flat wooden platform #E5D3B3 with a little
+two-wheeled hand cart #D4A373, a couple of crates. Transparent background.
 ```
 
----
+### `settler.png`: житель
+```
+A tiny cute villager seen from directly above, facing RIGHT: round head with light skin
+#F1D9C0 and short hair, small shoulders in a teal tunic #4FA3A5. Very simple, readable at
+16x16 pixels. Transparent background.
+```
+
+### `site.png`: будмайданчик
+```
+Top-down view of a small construction site: wooden scaffolding frame #A3785B around a square,
+a few planks and stones inside. Transparent background.
+```
 
 ## 3. Виробництво
 
@@ -163,7 +140,7 @@ the upper third and two small metal latches, soft rounded corners, a small outpu
 on the right edge. Transparent background.
 ```
 
-### `core.png`: ядро (3×3)
+### `core.png`: ратуша (3×3)
 ```
 The heart of the base, top-down, large square footprint. Dark slate rounded block #3B4252
 with a thin teal ring #4FA3A5 inscribed in it and a glowing teal diamond crystal in the
@@ -234,7 +211,7 @@ angry eyes near the right edge. Minimal style, not gory. Transparent background.
 
 ---
 
-## 6. Предмети (іконки, що їздять конвеєром)
+## 6. Предмети (іконки, що носять жителі)
 
 Для всіх: *«Single item icon, top-down, centred, fills 70% of the canvas, transparent background, same style.»* Додай до кожного:
 
@@ -253,6 +230,7 @@ angry eyes near the right edge. Minimal style, not gory. Transparent background.
 | `item_gear.png` | `A grey metal gear #8C99A6 with 8 teeth and a hole in the centre` |
 | `item_wire.png` | `A small coil of copper wire #D9894F` |
 | `item_ammo.png` | `Two brass cartridges #C9A227 side by side, bullets pointing up` |
+| `item_food.png` | `A small grain sack #C9B458 tied at the top with a green sprout` |
 
 ---
 
@@ -326,7 +304,7 @@ vector, centred, transparent background.
 
 **Ландшафт:** `ore_coal`, `ore_stone`, `ore_sand`
 
-**Логістика:** `belt`, `belt_curve`, `tunnel_in`, `tunnel_out`, `splitter`, `merger`, `sorter`
+**Поселення:** `house`, `farm`, `station`, `settler`, `site`
 
 **Виробництво:** `miner_base`, `miner_head`, `furnace_off`, `furnace_on`, `assembler`, `chest`, `core`
 
@@ -334,10 +312,10 @@ vector, centred, transparent background.
 
 **Вороги:** `enemy_crawler`, `enemy_swarmer`, `enemy_brute`
 
-**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`
+**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`, `item_food`
 
 **Ефекти:** `fx_muzzle`, `fx_flame`, `fx_splat`, `fx_ruin`
 
 **Інтерфейс:** `icon`, `menu`, `wave` (необов'язково), `research`
 
-Лишилось 44 картинки. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
+Лишилось 43 картинки. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.

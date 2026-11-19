@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -55,11 +56,7 @@ func (g *Game) iconBuilding(dst *ebiten.Image, k sim.Kind, x, y, size float64, d
 	g.cam.X = (g.cam.W/2 - x) / g.cam.Scale
 	g.cam.Y = (g.cam.H/2 - y) / g.cam.Scale
 	b := &sim.Building{Kind: k, Dir: d, Recipe: -1}
-	if k == sim.KBelt {
-		g.drawBelt(dst, b)
-	} else {
-		g.drawBuilding(dst, b, 1)
-	}
+	g.drawBuilding(dst, b, 1)
 	g.cam = saved
 }
 
@@ -91,7 +88,7 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 	}
 
 	// hint line
-	hint := "ЛКМ — будувати/обрати · ПКМ — знести · R — повернути · T — дослідження · V — розвернути лінію · Ctrl+тягни — копіювати/знести · F1 — довідка"
+	hint := "ЛКМ — будувати/обрати · ПКМ — знести · P — пауза будівлі · T — дослідження · Ctrl+тягни — копіювати/знести · F1 — довідка"
 	if g.pasting {
 		hint = "Вставка: ЛКМ — поставити · R — повернути · ПКМ або Esc — скасувати"
 	}
@@ -133,21 +130,24 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 	u := g.ui
 	var items []sim.Item
 	for it := sim.Item(1); it < sim.ItemCount; it++ {
-		if g.w.Stock[it] > 0 {
+		if g.stock[it] > 0 {
 			items = append(items, it)
 		}
 	}
 	rows := max((len(items)+1)/2, 1)
-	r := rect{14 * u, 14 * u, 250 * u, (44 + float64(rows)*26) * u}
+	r := rect{14 * u, 14 * u, 250 * u, (44 + float64(rows)*26 + 108) * u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
-	drawText(dst, "Запас ядра", r.x+14*u, r.y+10*u, 14*u, true, colInk, alignLeft)
+	g.drawTown(dst, r.x+14*u, r.y+10*u)
+	r.y += 108 * u
+	line(dst, float32(r.x+14*u), float32(r.y), float32(r.x+r.w-14*u), float32(r.y), float32(u), colPanelLine)
+	drawText(dst, "Запаси", r.x+14*u, r.y+10*u, 14*u, true, colInk, alignLeft)
 	for i, it := range items {
 		col, row := i%2, i/2
 		x := r.x + 14*u + float64(col)*118*u
 		y := r.y + 40*u + float64(row)*26*u
 		drawItem(dst, it, float32(x+9*u), float32(y+8*u), float32(16*u))
-		drawText(dst, fmtCount(g.w.Stock[it]), x+24*u, y, 13*u, false, colInk, alignLeft)
+		drawText(dst, fmtCount(g.stock[it]), x+24*u, y, 13*u, false, colInk, alignLeft)
 		if (rect{x, y - 4*u, 110 * u, 24 * u}).has(g.mouseX, g.mouseY) {
 			g.tooltip(dst, sim.Items[it].Name, "")
 		}
@@ -155,6 +155,42 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 	if len(items) == 0 {
 		drawText(dst, "порожньо", r.x+14*u, r.y+40*u, 13*u, false, colInkSoft, alignLeft)
 	}
+}
+
+// drawTown shows population, jobs and food.
+func (g *Game) drawTown(dst *ebiten.Image, x, y float64) {
+	u := g.ui
+	w := g.w
+	free, workers, carriers, starving := w.RoleCounts()
+	drawText(dst, "Поселення", x, y, 14*u, true, colInk, alignLeft)
+	pc := colInk
+	if w.Population() >= w.Housing() {
+		pc = colInkSoft
+	}
+	personGlyph(dst, float32(x+8*u), float32(y+38*u), float32(14*u), rgb(0x4FA3A5))
+	drawText(dst, fmt.Sprintf("%d / %d жителів", w.Population(), w.Housing()), x+22*u, y+28*u, 13*u, true, pc, alignLeft)
+	drawText(dst, fmt.Sprintf("вільних %d · працюють %d · носіїв %d", free, workers, carriers), x, y+48*u, 11.5*u, false, colInkSoft, alignLeft)
+	drawItem(dst, sim.Food, float32(x+8*u), float32(y+77*u), float32(16*u))
+	mins := w.FoodMinutes()
+	fc := colInk
+	msg := fmt.Sprintf("їжа %d · вистачить на %s", w.TotalStock(sim.Food), fmtMinutes(mins))
+	switch {
+	case starving > 0:
+		fc, msg = colBad, fmt.Sprintf("Голодують: %d! Потрібні ферми", starving)
+	case mins < 3:
+		fc = colBad
+	}
+	drawText(dst, msg, x+22*u, y+68*u, 12.5*u, true, fc, alignLeft)
+}
+
+func fmtMinutes(m float64) string {
+	switch {
+	case m > 600:
+		return "довго"
+	case m >= 1:
+		return fmt.Sprintf("%.0f хв", m)
+	}
+	return "< 1 хв"
 }
 
 func (g *Game) costLine(k sim.Kind) string {
@@ -177,7 +213,14 @@ func (g *Game) buildTooltip(dst *ebiten.Image, k sim.Kind) {
 	case g.w.Free[k] > 0:
 		body += fmt.Sprintf("\nБезкоштовно ще: %d", g.w.Free[k])
 	case !g.w.CanAfford(k):
-		body += "\nБракує ресурсів у ядрі"
+		body += "\nМатеріалів поки немає — майданчик чекатиме на них"
+	}
+	if n := sim.Builds[k].Workers; n > 0 {
+		if k == sim.KStation {
+			body += fmt.Sprintf("\nЗаймає %d жителів як носіїв", n)
+		} else {
+			body += fmt.Sprintf("\nПотрібно працівників: %d", n)
+		}
 	}
 	if big := k.Big(); big != sim.KNone && g.w.Unlocked(big) {
 		body += "\nTab — перемкнути на «" + sim.Builds[big].Name + "» (2×2)"
@@ -243,6 +286,56 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 		return float64(1+countLines(wrap(def.Desc, 38))) * 17 * u
 	})
 
+	if b.Site {
+		add(func(y float64) float64 {
+			if len(b.Need) == 0 {
+				drawText(dst, fmt.Sprintf("Будується: %d%%", int(b.BuildWork*100)), r.x+pad, y, 13*u, true, colInk, alignLeft)
+				return 24 * u
+			}
+			drawText(dst, "Будмайданчик чекає матеріалів:", r.x+pad, y, 13*u, true, colInk, alignLeft)
+			x := r.x + pad
+			for _, n := range b.Need {
+				drawItem(dst, n.Item, float32(x+8*u), float32(y+32*u), float32(15*u))
+				label := fmt.Sprint(n.N)
+				c := colInk
+				if g.stock[n.Item] < n.N {
+					c = colBad
+				}
+				drawText(dst, label, x+18*u, y+24*u, 12.5*u, true, c, alignLeft)
+				x += 30*u + textWidth(label, 12.5*u, true)
+			}
+			return 50 * u
+		})
+	} else if n := sim.Builds[b.Kind].Workers; n > 0 {
+		add(func(y float64) float64 {
+			var msg string
+			c := colInk
+			switch {
+			case b.Paused:
+				msg, c = "На паузі — працівники вільні", colInkSoft
+			case b.Kind == sim.KStation:
+				msg = fmt.Sprintf("Носіїв: %d / %d · радіус %d клітинок", b.Staff(), n, int(sim.StationRadius))
+			case b.Inside() >= n:
+				msg = fmt.Sprintf("Працівників: %d / %d", b.Inside(), n)
+			case b.Staff() > b.Inside():
+				msg = fmt.Sprintf("Працівник іде на роботу (%d / %d)", b.Inside(), n)
+			default:
+				msg, c = fmt.Sprintf("Бракує працівників: %d / %d", b.Inside(), n), colBad
+			}
+			drawText(dst, msg, r.x+pad, y, 13*u, true, c, alignLeft)
+			if c == colBad {
+				drawText(dst, "Збудуй будинки або постав іншу\nбудівлю на паузу (P).", r.x+pad, y+20*u, 11.5*u, false, colInkSoft, alignLeft)
+				return 58 * u
+			}
+			return 24 * u
+		})
+	}
+	if h := sim.Builds[b.Kind].Housing; h > 0 && !b.Site {
+		add(func(y float64) float64 {
+			drawText(dst, fmt.Sprintf("Мешканців: %d / %d", g.w.Residents(b.ID), h), r.x+pad, y, 13*u, true, colInk, alignLeft)
+			return 24 * u
+		})
+	}
 	if b.Dmg > 0 {
 		add(func(y float64) float64 {
 			max := g.w.MaxHP(b)
@@ -256,7 +349,7 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			msg := fmt.Sprintf("Набоїв: %d пострілів (макс. %d)", b.Ammo, sim.TurretAmmoCap*b.Size())
 			c := colInk
 			if b.Ammo == 0 {
-				msg, c = "Без набоїв! Підвези «Набої» конвеєром.", colBad
+				msg, c = "Без набоїв! Жителі принесуть «Набої» зі складу.", colBad
 			}
 			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
 			return 22 * u
@@ -266,10 +359,16 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			msg := fmt.Sprintf("Паливо: %d%%", int(b.Ammo)*100/sim.FlamerFuelCap)
 			c := colInk
 			if b.Ammo == 0 {
-				msg, c = "Без палива! Підвези вугілля конвеєром.", colBad
+				msg, c = "Без палива! Жителі принесуть вугілля зі складу.", colBad
 			}
 			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
 			return 22 * u
+		})
+	case sim.KFarm:
+		add(func(y float64) float64 {
+			drawItem(dst, sim.Food, float32(r.x+pad+9*u), float32(y+9*u), float32(18*u))
+			drawText(dst, fmt.Sprintf("Їжа · %.1f/хв · годує ~%d жителів", 60/sim.FarmTime, int(math.Floor(sim.MealInterval/sim.FarmTime))), r.x+pad+26*u, y, 13*u, false, colInk, alignLeft)
+			return 28 * u
 		})
 	case sim.KMiner:
 		add(func(y float64) float64 {
@@ -313,7 +412,7 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 		}
 		if b.Kind.Base() == sim.KFurnace {
 			add(func(y float64) float64 {
-				msg := "Обирається сама за першою рудою"
+				msg := "Обирається сама за наявною рудою"
 				if !b.AutoRecipe {
 					msg = "Рецепт закріплено вручну"
 				}
@@ -344,68 +443,14 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			}
 			return 42 * u
 		})
-	case sim.KSorter:
-		add(func(y float64) float64 {
-			drawText(dst, "Фільтр (іде вбік)", r.x+pad, y, 13*u, true, colInk, alignLeft)
-			return 24 * u
-		})
-		add(func(y float64) float64 {
-			cell := 34 * u
-			cols := int((W - 2*pad) / cell)
-			opts := []sim.Item{sim.ItemNone}
-			for it := sim.Item(1); it < sim.ItemCount; it++ {
-				opts = append(opts, it)
-			}
-			for i, it := range opts {
-				it := it
-				cr := rect{r.x + pad + float64(i%cols)*cell, y + float64(i/cols)*cell, cell - 4*u, cell - 4*u}
-				bg := rgb(0xF4F0E8)
-				if b.Filter == it {
-					bg = mix(colBody, colOK, 0.35)
-				} else if cr.has(g.mouseX, g.mouseY) {
-					bg = rgb(0xE9E2D4)
-				}
-				fillRoundRect(dst, float32(cr.x), float32(cr.y), float32(cr.w), float32(cr.h), float32(6*u), bg)
-				if it == sim.ItemNone {
-					drawText(dst, "—", cr.x+cr.w/2, cr.y+cr.h/2-9*u, 14*u, true, colInkSoft, alignCenter)
-				} else {
-					drawItem(dst, it, float32(cr.x+cr.w/2), float32(cr.y+cr.h/2), float32(18*u))
-				}
-				if cr.has(g.mouseX, g.mouseY) {
-					name := "Без фільтра: все йде прямо"
-					if it != sim.ItemNone {
-						name = sim.Items[it].Name
-					}
-					defer g.tooltip(dst, name, "")
-				}
-				g.addButton(cr, func() { g.w.SetFilter(b.ID, it) })
-			}
-			rows := (len(opts) + cols - 1) / cols
-			return float64(rows)*cell + 6*u
-		})
-	case sim.KTunnel:
-		add(func(y float64) float64 {
-			msg := "Вихід тунелю."
-			c := colInk
-			if !b.Exit {
-				if ex, k := g.w.TunnelExit(b); ex != nil {
-					msg = fmt.Sprintf("Вхід. З'єднаний з виходом через %d клітинок.", k-1)
-				} else {
-					msg = "Вхід без виходу. Постав ще один тунель\nу тому ж напрямку не далі ніж за 5 клітинок."
-					c = colBad
-				}
-			}
-			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
-			return float64(countLines(msg))*18*u + 6*u
-		})
 	case sim.KChest:
 		add(func(y float64) float64 {
-			drawText(dst, fmt.Sprintf("Заповнено: %d / %d", b.StoreCount(), sim.ChestCap), r.x+pad, y, 13*u, false, colInk, alignLeft)
+			drawText(dst, fmt.Sprintf("Заповнено: %d / %d", b.StoreCount(), g.w.ChestCapacity()), r.x+pad, y, 13*u, false, colInk, alignLeft)
 			return 22 * u
 		})
 	case sim.KCore:
 		add(func(y float64) float64 {
-			drawText(dst, "Привозь сюди пластини й деталі —\nз них будуються нові машини.", r.x+pad, y, 12.5*u, false, colInk, alignLeft)
+			drawText(dst, "Головний склад: сюди жителі зносять\nусе вироблене, звідси беруть матеріали.", r.x+pad, y, 12.5*u, false, colInk, alignLeft)
 			return 40 * u
 		})
 	}
@@ -415,7 +460,15 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			bw := (W - 2*pad - 8*u) / 2
 			b1 := rect{r.x + pad, y + 4*u, bw, 30 * u}
 			b2 := rect{b1.x + bw + 8*u, y + 4*u, bw, 30 * u}
-			g.smallButton(dst, b1, "Повернути (R)", func() { g.w.Rotate(b.ID) })
+			if sim.Builds[b.Kind].Workers > 0 && !b.Site {
+				label := "Пауза (P)"
+				if b.Paused {
+					label = "Відновити (P)"
+				}
+				g.smallButton(dst, b1, label, func() { g.w.SetPaused(b.ID, !b.Paused) })
+			} else {
+				g.smallButton(dst, b1, "Повернути (R)", func() { g.w.Rotate(b.ID) })
+			}
 			g.smallButton(dst, b2, "Знести", func() {
 				g.w.Remove(b.ID)
 				g.selected = 0
@@ -559,26 +612,29 @@ func (g *Game) drawConfirmNew(dst *ebiten.Image) {
 	g.bigButton(dst, yes, "Так, почати заново", g.newGame)
 }
 
-const helpText = `Будуй фабрику, досліджуй нове й захищай ядро від хвиль.
+const helpText = `Розбудуй поселення, нагодуй жителів і захисти ратушу від хвиль.
 
-1. На старті є безкоштовні 1 бур і 10 конвеєрів. Постав бур (6) на сіро-блакитний
-   поклад заліза й протягни конвеєр (1) до ядра — руда піде в запас.
-2. Далі все коштує ресурсів із ядра. Другий бур постав на камінь (бежевий поклад).
-3. Відкрий дослідження (T): «Плавка» дає піч, далі — збирач, склади, логістика, зброя.
-4. Кожні кілька хвилин приходить хвиля ворогів. Таймер і напрямок — угорі.
-   Ядро має слабку гармату, але далі потрібні стіни (Z), вогнемети (X, їдять вугілля)
-   і кулеметні турелі (C, їдять набої зі збирача). Підвози боєприпаси конвеєром.
-5. Зруйноване лишає червоний слід — кнопка «Відбудувати» (B) поставить усе назад.
+Жителі — це все. Кожна будівля з працівником (бур, піч, ферма, турель…) працює,
+тільки поки він усередині. Вільні жителі будують і переносять вантажі.
+Нема вільних рук — постав будівлю на паузу (P), і її працівник звільниться.
 
-Логістика: тунель (2), розгалужувач (3), об'єднувач (4), сортер (5).
-Покращені 2×2 версії бура, печі, збирача й турелі відкриваються в дослідженнях —
-обери інструмент і натисни Tab, щоб перемкнутися на велику версію.
+1. На старті безкоштовні: бур, ферма і будинок. Постав бур (5) на поклад заліза,
+   ферму (2) на чисту землю, будинок (1) поруч із ратушею.
+2. Їжа: кожен житель їсть раз на 1.5 хв. Без їжі він слабшає, а за 2 хв помирає.
+   Одна ферма годує ~11 жителів.
+3. Будинки дають житло; де живуть двоє й є їжа, народжуються нові жителі.
+4. Будівлі ставляться як будмайданчики: жителі зносять матеріали й будують.
+5. Склад (3) біля виробництва скорочує шлях. Вантажна станція (4) дає трьох
+   носіїв, які лише переносять вантажі — швидше й більше, у радіусі 12 клітинок.
+6. Дослідження (T) відкривають піч, збирач, зброю й покращення.
+7. Хвилі ворогів: стіни (Z), вогнемети (X) і турелі (C). Турелям потрібні
+   працівник і боєприпаси — жителі принесуть їх зі складу.
 
 Керування
-ЛКМ — поставити (тягни конвеєр мишею) · ПКМ — знести (можна тягнути)
-R / Shift+R — повернути · Q — взяти будівлю під курсором · V — розвернути лінію
+ЛКМ — поставити / обрати · ПКМ — знести · P — пауза будівлі під курсором
+Tab — велика версія будівлі · R — повернути · Q — взяти будівлю під курсором
 Ctrl + тягни ЛКМ — скопіювати область · Ctrl + тягни ПКМ — знести область
-WASD або середня кнопка — камера · колесо — масштаб · Esc — меню (там є мирний режим)`
+WASD або середня кнопка — камера · колесо — масштаб · Esc — меню`
 
 func (g *Game) drawHelp(dst *ebiten.Image) {
 	u := g.ui

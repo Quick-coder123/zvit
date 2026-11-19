@@ -5,12 +5,6 @@ import (
 	"sort"
 )
 
-// BeltItem is an item riding a belt. P runs 0 (entry) .. 1 (exit).
-type BeltItem struct {
-	Item Item
-	P    float32
-}
-
 // Building is any placed structure. Fields are exported for gob saves.
 type Building struct {
 	ID    int32
@@ -19,9 +13,12 @@ type Building struct {
 	Dir   Dir
 	Owner uint8
 
-	// Belt: items sorted by P descending (front first).
-	Belt  []BeltItem
-	Curve int8 // 0 straight, -1 fed from left, +1 fed from right
+	// Construction: a placed building is a site until materials are delivered
+	// and a builder has worked on it.
+	Site      bool
+	Need      []Stack // materials still to be delivered to the site
+	BuildWork float32 // 0..1
+	Paused    bool    // player switched it off; its workers are freed
 
 	// Machines
 	Recipe     int // -1 none
@@ -31,17 +28,11 @@ type Building struct {
 	InBuf      []Stack
 	OutItem    Item
 	OutN       int
-	OutRR      int
 	MinerItem  Item
 	MinerTiles int
 
-	// Chest
+	// Storehouse contents
 	Store []Stack
-
-	// Logistics
-	Filter Item      // sorter
-	Exit   bool      // tunnel: this end is the exit
-	Buf    []BufItem // routers (splitter, merger, sorter)
 
 	// Combat
 	Dmg       float32 // damage taken (0 = full health)
@@ -50,12 +41,14 @@ type Building struct {
 	Aim       float32 // turret barrel angle
 	Cool      float32 // weapon cooldown
 	FreeBuilt bool    // built with a starter token; refunds the token
-}
 
-// BufItem is an item waiting inside a router, remembering where it came from.
-type BufItem struct {
-	Item Item
-	From Dir // travel direction it arrived with
+	// transient, rebuilt every allocation pass / on load
+	staff   int          // settlers employed here
+	inside  int          // employed settlers currently inside
+	pend    map[Item]int // items on their way here
+	res     map[Item]int // items promised to haulers (outputs, storage)
+	builder int32        // settler building this site
+	hungry  bool         // a worker inside is starving
 }
 
 func (b *Building) Size() int { return Builds[b.Kind].Size }
@@ -66,28 +59,16 @@ func (b *Building) Covers(p Pos) bool {
 	return p.X >= b.Pos.X && p.Y >= b.Pos.Y && p.X < b.Pos.X+s && p.Y < b.Pos.Y+s
 }
 
-// FrontTiles are the tiles directly in front of the output face.
-func (b *Building) FrontTiles() []Pos {
-	s := b.Size()
-	out := make([]Pos, 0, s)
-	for i := 0; i < s; i++ {
-		var p Pos
-		switch b.Dir {
-		case East:
-			p = Pos{b.Pos.X + s, b.Pos.Y + i}
-		case West:
-			p = Pos{b.Pos.X - 1, b.Pos.Y + i}
-		case South:
-			p = Pos{b.Pos.X + i, b.Pos.Y + s}
-		case North:
-			p = Pos{b.Pos.X + i, b.Pos.Y - 1}
-		}
-		out = append(out, p)
-	}
-	return out
+// Staff and Inside report employment (for the UI).
+func (b *Building) Staff() int  { return b.staff }
+func (b *Building) Inside() int { return b.inside }
+
+// Running reports whether the building is complete, switched on and staffed.
+func (b *Building) Running() bool {
+	return !b.Site && !b.Paused && b.inside >= Builds[b.Kind].Workers
 }
 
-// StoreCount is the total number of items held in a chest.
+// StoreCount is the total number of items held in a storehouse.
 func (b *Building) StoreCount() int {
 	n := 0
 	for _, s := range b.Store {
@@ -96,12 +77,51 @@ func (b *Building) StoreCount() int {
 	return n
 }
 
+func (b *Building) storeHas(it Item) int {
+	for _, s := range b.Store {
+		if s.Item == it {
+			return s.N
+		}
+	}
+	return 0
+}
+
+func (b *Building) storeAdd(it Item, n int) {
+	for i := range b.Store {
+		if b.Store[i].Item == it {
+			b.Store[i].N += n
+			return
+		}
+	}
+	b.Store = append(b.Store, Stack{it, n})
+}
+
+func (b *Building) storeTake(it Item, n int) int {
+	for i := range b.Store {
+		if b.Store[i].Item == it {
+			if n > b.Store[i].N {
+				n = b.Store[i].N
+			}
+			b.Store[i].N -= n
+			if b.Store[i].N == 0 {
+				b.Store = append(b.Store[:i], b.Store[i+1:]...)
+			}
+			return n
+		}
+	}
+	return 0
+}
+
 type World struct {
 	Seed      int64
 	Tick      uint64
 	NextID    int32
 	Buildings map[int32]*Building
-	Stock     [ItemCount]int
+	Stock     [ItemCount]int // contents of the town hall (unlimited)
+
+	Settlers    []*Settler
+	NextSettler int32
+	WanderTimer float32
 
 	Free       [KindCount]int  // starter buildings that cost nothing
 	Researched map[string]bool // finished research
@@ -112,6 +132,7 @@ type World struct {
 	Peaceful   bool    // no waves
 	Ruins      []Spec  // destroyed buildings that can be rebuilt
 	Kills      int
+	Deaths     int
 
 	Shots   []Shot   // transient weapon effects (not saved)
 	Notices []string // messages for the UI (not saved)
@@ -120,16 +141,25 @@ type World struct {
 	chunks map[Pos]*[chunkSize * chunkSize]Item
 	order  []int32
 	dirty  bool
-	retry  []*Building
 }
 
-// NewWorld creates a fresh world with a core at the origin and a starter stock.
+// NewWorld creates a fresh settlement: a town hall, four settlers and a few
+// starter supplies.
 func NewWorld(seed int64) *World {
 	w := &World{Seed: seed, Buildings: map[int32]*Building{}, Researched: map[string]bool{}}
 	w.initCaches()
-	w.add(&Building{Kind: KCore, Pos: Pos{-1, -1}, Recipe: -1})
+	core := w.add(&Building{Kind: KCore, Pos: Pos{-1, -1}, Recipe: -1})
 	w.Free[KMiner] = 1
-	w.Free[KBelt] = 10
+	w.Free[KFarm] = 1
+	w.Free[KHouse] = 1
+	w.Stock[Food] = 40
+	w.Stock[Stone] = 30
+	w.Stock[IronOre] = 20
+	for i := 0; i < 4; i++ {
+		s := w.spawnSettler(core)
+		s.X += float64(i%2) - 0.5
+		s.Y += 2.2
+	}
 	w.NextWave = FirstWaveDelay
 	w.WaveAngle = w.rollWaveAngle()
 	return w
@@ -188,35 +218,85 @@ func (w *World) Order() []int32 {
 	return w.order
 }
 
+// --- stock across all storages ------------------------------------------------
+
+// TotalStock counts an item in the town hall and all storehouses.
+func (w *World) TotalStock(it Item) int {
+	n := w.Stock[it]
+	for _, b := range w.Buildings {
+		if b.Kind == KChest && !b.Site {
+			n += b.storeHas(it)
+		}
+	}
+	return n
+}
+
+// TakeStock removes items from storage (town hall first). It reports whether
+// the full amount was available; nothing is taken otherwise.
+func (w *World) TakeStock(it Item, n int) bool {
+	if w.TotalStock(it) < n {
+		return false
+	}
+	t := min(n, w.Stock[it])
+	w.Stock[it] -= t
+	n -= t
+	for _, id := range w.Order() {
+		if n == 0 {
+			break
+		}
+		if b := w.Buildings[id]; b.Kind == KChest && !b.Site {
+			n -= b.storeTake(it, n)
+		}
+	}
+	return true
+}
+
+func (w *World) affordable(cost []Stack) bool {
+	for _, c := range cost {
+		if w.TotalStock(c.Item) < c.N {
+			return false
+		}
+	}
+	return true
+}
+
+// ChestCapacity of a storehouse, including research.
+func (w *World) ChestCapacity() int {
+	if w.Researched["chest"] {
+		return ChestCap * 2
+	}
+	return ChestCap
+}
+
+// --- placing and removing --------------------------------------------------------
+
 var (
 	ErrOccupied = errors.New("місце зайняте")
 	ErrNoOre    = errors.New("бур треба ставити на поклад")
-	ErrNoFunds  = errors.New("бракує ресурсів у ядрі")
-	ErrCore     = errors.New("ядро не можна знести")
+	ErrOnOre    = errors.New("ферму треба ставити на чисту землю")
+	ErrNoFunds  = errors.New("бракує ресурсів")
+	ErrCore     = errors.New("ратушу не можна знести")
 	ErrLocked   = errors.New("спершу відкрий це в дослідженнях (T)")
+	ErrLegacy   = errors.New("цієї будівлі більше немає")
 )
 
-// CanAfford checks starter tokens and the core stock for a building cost.
+// CanAfford reports whether the materials for a building exist in storage
+// (or a starter token is left). Building is allowed either way: the site
+// simply waits for materials.
 func (w *World) CanAfford(k Kind) bool {
 	return w.Free[k] > 0 || w.affordable(Builds[k].Cost)
 }
 
 // CheckPlace validates a placement without changing anything.
 func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
+	if k.Legacy() || k == KCore || k == KNone || k >= KindCount {
+		return ErrLegacy
+	}
 	s := Builds[k].Size
-	if k == KBelt {
-		if b := w.At(p); b != nil {
-			if b.Kind == KBelt {
-				return nil // re-orienting an existing belt is free
-			}
-			return ErrOccupied
-		}
-	} else {
-		for y := 0; y < s; y++ {
-			for x := 0; x < s; x++ {
-				if w.At(p.Add(x, y)) != nil {
-					return ErrOccupied
-				}
+	for y := 0; y < s; y++ {
+		for x := 0; x < s; x++ {
+			if w.At(p.Add(x, y)) != nil {
+				return ErrOccupied
 			}
 		}
 	}
@@ -228,8 +308,8 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 			return ErrNoOre
 		}
 	}
-	if !w.CanAfford(k) {
-		return ErrNoFunds
+	if k == KFarm && w.OreAt(p) != ItemNone {
+		return ErrOnOre
 	}
 	return nil
 }
@@ -252,117 +332,49 @@ func (w *World) minerOre(p Pos, size int) (Item, int) {
 
 // Spec describes a building to place, including copied settings.
 type Spec struct {
-	Kind    Kind
-	Pos     Pos
-	Dir     Dir
-	Recipe  int  // -1: none / automatic
-	Filter  Item // sorter filter
-	Exit    bool // tunnel end; only used when ExitSet
-	ExitSet bool
+	Kind   Kind
+	Pos    Pos
+	Dir    Dir
+	Recipe int // -1: none / automatic
 }
 
-// Place builds a structure, paying its cost from the core stock.
+// Place puts down a construction site.
 func (w *World) Place(k Kind, p Pos, d Dir, owner uint8) (*Building, error) {
 	return w.PlaceSpec(Spec{Kind: k, Pos: p, Dir: d, Recipe: -1}, owner)
 }
 
-// PlaceSpec builds a structure from a full spec (used by copy/paste).
+// PlaceSpec puts down a construction site from a full spec (copy/paste).
 func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 	k, p, d := sp.Kind, sp.Pos, sp.Dir
-	if k == KBelt {
-		if b := w.At(p); b != nil && b.Kind == KBelt {
-			if b.Dir != d {
-				b.Dir = d
-				w.refreshAround(p)
-			}
-			return b, nil
-		}
-	}
 	if err := w.CheckPlace(k, p, d); err != nil {
 		return nil, err
 	}
-	b := &Building{Kind: k, Pos: p, Dir: d, Owner: owner, Recipe: -1}
+	b := &Building{Kind: k, Pos: p, Dir: d, Owner: owner, Recipe: -1, Site: true}
 	if w.Free[k] > 0 {
 		w.Free[k]--
 		b.FreeBuilt = true
 	} else {
-		for _, c := range Builds[k].Cost {
-			w.Stock[c.Item] -= c.N
-		}
+		b.Need = append([]Stack(nil), Builds[k].Cost...)
 	}
-	switch k {
-	case KMiner, KMinerBig:
+	switch k.Base() {
+	case KMiner:
 		b.MinerItem, b.MinerTiles = w.minerOre(p, b.Size())
-	case KFurnace, KFurnaceBig:
+	case KFurnace:
 		b.AutoRecipe = true
-	case KTunnel:
-		if sp.ExitSet {
-			b.Exit = sp.Exit
-		} else {
-			b.Exit = w.TunnelWouldExit(p, d)
-		}
-	case KSorter:
-		b.Filter = sp.Filter
 	}
 	w.add(b)
 	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k.Base() && w.RecipeUnlocked(sp.Recipe) {
 		w.SetRecipe(b.ID, sp.Recipe)
 	}
-	w.refreshAround(p)
 	return b, nil
 }
 
 // SpecOf captures a building's settings for copying.
 func SpecOf(b *Building) Spec {
-	return Spec{Kind: b.Kind, Pos: b.Pos, Dir: b.Dir, Recipe: b.Recipe, Filter: b.Filter, Exit: b.Exit, ExitSet: b.Kind == KTunnel}
+	return Spec{Kind: b.Kind, Pos: b.Pos, Dir: b.Dir, Recipe: b.Recipe}
 }
 
-// TunnelWouldExit decides whether a new tunnel at p becomes the exit of an
-// unpaired entrance behind it.
-func (w *World) TunnelWouldExit(p Pos, d Dir) bool {
-	back := d.Opp()
-	q := p
-	for k := 1; k <= TunnelMax+1; k++ {
-		q = q.Step(back)
-		tb := w.At(q)
-		if tb != nil && tb.Kind == KTunnel && tb.Dir == d {
-			if tb.Exit {
-				return false
-			}
-			ex, _ := w.TunnelExit(tb)
-			return ex == nil
-		}
-	}
-	return false
-}
-
-// TunnelExit finds the exit paired with entrance b and the distance to it.
-func (w *World) TunnelExit(b *Building) (*Building, int) {
-	if b.Kind != KTunnel || b.Exit {
-		return nil, 0
-	}
-	q := b.Pos
-	for k := 1; k <= TunnelMax+1; k++ {
-		q = q.Step(b.Dir)
-		tb := w.At(q)
-		if tb != nil && tb.Kind == KTunnel && tb.Dir == b.Dir {
-			if tb.Exit {
-				return tb, k
-			}
-			return nil, 0
-		}
-	}
-	return nil, 0
-}
-
-// SetFilter sets a sorter's filter item.
-func (w *World) SetFilter(id int32, it Item) {
-	if b := w.Buildings[id]; b != nil && b.Kind == KSorter {
-		b.Filter = it
-	}
-}
-
-// Remove deletes a building and refunds its cost and contents to the core.
+// Remove deletes a building and refunds its cost and contents to the town hall.
 func (w *World) Remove(id int32) error {
 	b := w.Buildings[id]
 	if b == nil {
@@ -371,17 +383,37 @@ func (w *World) Remove(id int32) error {
 	if b.Kind == KCore {
 		return ErrCore
 	}
-	if b.FreeBuilt {
+	switch {
+	case b.FreeBuilt:
 		w.Free[b.Kind]++
-	} else {
+	case b.Site:
+		// refund what was already delivered
+		for _, c := range Builds[b.Kind].Cost {
+			left := 0
+			for _, n := range b.Need {
+				if n.Item == c.Item {
+					left = n.N
+				}
+			}
+			w.Stock[c.Item] += c.N - left
+		}
+	default:
 		for _, c := range Builds[b.Kind].Cost {
 			w.Stock[c.Item] += c.N
 		}
 	}
-	w.Stock[Ammo] += int(b.Ammo) / AmmoShots * boolInt(b.Kind.Base() == KTurret)
-	w.Stock[Coal] += int(b.Ammo) / CoalFuel * boolInt(b.Kind == KFlamer)
-	for _, it := range b.Belt {
-		w.Stock[it.Item]++
+	w.dropContents(b)
+	w.unplace(b)
+	return nil
+}
+
+// dropContents moves everything a building holds into the town hall.
+func (w *World) dropContents(b *Building) {
+	switch b.Kind.Base() {
+	case KTurret:
+		w.Stock[Ammo] += int(b.Ammo) / AmmoShots
+	case KFlamer:
+		w.Stock[Coal] += int(b.Ammo) / CoalFuel
 	}
 	for _, s := range b.InBuf {
 		w.Stock[s.Item] += s.N
@@ -389,27 +421,48 @@ func (w *World) Remove(id int32) error {
 	for _, s := range b.Store {
 		w.Stock[s.Item] += s.N
 	}
-	for _, bi := range b.Buf {
-		w.Stock[bi.Item]++
-	}
 	w.Stock[b.OutItem] += b.OutN
 	w.Stock[ItemNone] = 0
-	w.mark(b, 0)
-	delete(w.Buildings, id)
-	w.dirty = true
-	w.refreshAround(b.Pos)
-	return nil
 }
 
-// Rotate turns a building clockwise in place.
+// unplace takes a building off the map and releases the people tied to it.
+func (w *World) unplace(b *Building) {
+	w.mark(b, 0)
+	delete(w.Buildings, b.ID)
+	w.dirty = true
+	for _, s := range w.Settlers {
+		if s.Job == b.ID {
+			s.Job, s.Inside = 0, false
+		}
+		if s.Home == b.ID {
+			s.Home = 0
+		}
+	}
+}
+
+// Rotate turns a building clockwise in place (cosmetic).
 func (w *World) Rotate(id int32) {
 	if b := w.Buildings[id]; b != nil && b.Kind != KCore {
 		b.Dir = b.Dir.CW()
-		w.refreshAround(b.Pos)
 	}
 }
 
-// SetRecipe selects a recipe for a machine, returning buffered inputs to the core.
+// SetPaused switches a building off (freeing its workers) or back on.
+func (w *World) SetPaused(id int32, paused bool) {
+	if b := w.Buildings[id]; b != nil && b.Kind != KCore {
+		b.Paused = paused
+		if paused {
+			for _, s := range w.Settlers {
+				if s.Job == b.ID {
+					s.Job, s.Inside = 0, false
+				}
+			}
+			b.staff, b.inside = 0, 0
+		}
+	}
+}
+
+// SetRecipe selects a recipe for a machine, returning buffered inputs to the town hall.
 func (w *World) SetRecipe(id int32, r int) {
 	b := w.Buildings[id]
 	if b == nil || b.Recipe == r || (r >= 0 && !w.RecipeUnlocked(r)) {
@@ -428,128 +481,6 @@ func (w *World) SetRecipe(id int32, r int) {
 			b.InBuf = append(b.InBuf, Stack{in.Item, 0})
 		}
 	}
-}
-
-// feeds reports whether the building at q is a belt pointing into tile p.
-func (w *World) feeds(q, p Pos) bool {
-	b := w.At(q)
-	return b != nil && b.Kind == KBelt && q.Step(b.Dir) == p
-}
-
-// refreshAround recomputes belt curve flags near a changed tile.
-func (w *World) refreshAround(p Pos) {
-	for y := -2; y <= 4; y++ {
-		for x := -2; x <= 4; x++ {
-			if b := w.At(p.Add(x, y)); b != nil && b.Kind == KBelt {
-				w.refreshCurve(b)
-			}
-		}
-	}
-}
-
-func (w *World) refreshCurve(b *Building) {
-	p := b.Pos
-	b.Curve = 0
-	if w.feeds(p.Step(b.Dir.Opp()), p) {
-		return
-	}
-	left := w.feeds(p.Step(b.Dir.CCW()), p)
-	right := w.feeds(p.Step(b.Dir.CW()), p)
-	if left && !right {
-		b.Curve = -1
-	} else if right && !left {
-		b.Curve = 1
-	}
-}
-
-// beltPrev returns the belt feeding b as part of the same line (straight or
-// curve), or nil.
-func (w *World) beltPrev(b *Building) *Building {
-	p := b.Pos
-	var q Pos
-	switch b.Curve {
-	case 0:
-		q = p.Step(b.Dir.Opp())
-	case -1:
-		q = p.Step(b.Dir.CCW())
-	default:
-		q = p.Step(b.Dir.CW())
-	}
-	if w.feeds(q, p) {
-		return w.At(q)
-	}
-	return nil
-}
-
-func (w *World) beltNext(b *Building) *Building {
-	n := w.At(b.Pos.Step(b.Dir))
-	if n != nil && n.Kind == KBelt && w.beltPrev(n) == b {
-		return n
-	}
-	return nil
-}
-
-// BeltLine returns the connected belt line through b in flow order.
-func (w *World) BeltLine(b *Building) (line []*Building, ring bool) {
-	if b == nil || b.Kind != KBelt {
-		return nil, false
-	}
-	start := b
-	seen := map[int32]bool{b.ID: true}
-	for {
-		p := w.beltPrev(start)
-		if p == nil {
-			break
-		}
-		if seen[p.ID] {
-			ring = p == b || ring
-			break
-		}
-		seen[p.ID] = true
-		start = p
-	}
-	if ring {
-		start = b
-	}
-	seen = map[int32]bool{}
-	for c := start; c != nil && !seen[c.ID]; c = w.beltNext(c) {
-		seen[c.ID] = true
-		line = append(line, c)
-	}
-	return line, ring
-}
-
-// ReverseLine flips the direction of the whole belt line through b.
-func (w *World) ReverseLine(b *Building) int {
-	line, ring := w.BeltLine(b)
-	if len(line) == 0 {
-		return 0
-	}
-	dirs := make([]Dir, len(line))
-	for i, c := range line {
-		switch {
-		case i > 0:
-			dirs[i], _ = DirBetween(c.Pos, line[i-1].Pos)
-		case ring:
-			dirs[i], _ = DirBetween(c.Pos, line[len(line)-1].Pos)
-		default:
-			dirs[i] = c.Dir.Opp()
-		}
-	}
-	for i, c := range line {
-		c.Dir = dirs[i]
-		n := len(c.Belt)
-		for j := 0; j < n/2; j++ {
-			c.Belt[j], c.Belt[n-1-j] = c.Belt[n-1-j], c.Belt[j]
-		}
-		for j := range c.Belt {
-			c.Belt[j].P = 1 - c.Belt[j].P
-		}
-	}
-	for _, c := range line {
-		w.refreshAround(c.Pos)
-	}
-	return len(line)
 }
 
 func boolInt(b bool) int {

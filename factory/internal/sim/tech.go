@@ -18,26 +18,22 @@ var Techs = []Tech{
 		Cost: []Stack{{IronOre, 30}, {Stone, 20}}, Unlocks: []Kind{KFurnace}},
 	{ID: "walls", Name: "Укріплення", Desc: "Кам'яні стіни. Вороги мусять їх прогризати.",
 		Cost: []Stack{{Stone, 30}}, Unlocks: []Kind{KWall}},
-	{ID: "chest", Name: "Склади", Desc: "Склад на 200 предметів — буфер для ліній і турелей.",
-		Cost: []Stack{{IronPlate, 20}}, Req: []string{"furnace"}, Unlocks: []Kind{KChest}},
+	{ID: "station", Name: "Вантажна справа", Desc: "Вантажна станція: три носії, що лише переносять вантажі — швидше й більше.",
+		Cost: []Stack{{IronOre, 30}, {Stone, 30}}, Unlocks: []Kind{KStation}},
+	{ID: "chest", Name: "Стелажі", Desc: "Склади вміщують удвічі більше: 400 предметів.",
+		Cost: []Stack{{IronPlate, 40}, {Stone, 40}}, Req: []string{"furnace"}},
 	{ID: "flamer", Name: "Вогнемет", Desc: "Турель ближнього бою. Палить вугілля, б'є по площі.",
 		Cost: []Stack{{IronPlate, 30}, {Brick, 15}, {Coal, 20}}, Req: []string{"furnace"}, Unlocks: []Kind{KFlamer}},
 	{ID: "assembler", Name: "Складання", Desc: "Збирач: шестерні й дріт — основа всього складнішого.",
 		Cost: []Stack{{IronPlate, 40}, {CopperPlate, 25}}, Req: []string{"furnace"}, Unlocks: []Kind{KAssembler}},
 	{ID: "turret", Name: "Кулеметна турель", Desc: "Далекобійна турель і рецепт набоїв у збирачі.",
 		Cost: []Stack{{IronPlate, 60}, {Gear, 30}, {CopperPlate, 30}}, Req: []string{"assembler"}, Unlocks: []Kind{KTurret}},
-	{ID: "tunnel", Name: "Тунелі", Desc: "Стрічки під іншими будівлями, до 5 клітинок.",
-		Cost: []Stack{{IronPlate, 40}, {Gear, 15}}, Req: []string{"assembler"}, Unlocks: []Kind{KTunnel}},
-	{ID: "split", Name: "Розподіл потоків", Desc: "Розгалужувач і об'єднувач.",
-		Cost: []Stack{{IronPlate, 50}, {Gear, 25}, {Wire, 20}}, Req: []string{"assembler"}, Unlocks: []Kind{KSplitter, KMerger}},
-	{ID: "sorter", Name: "Сортування", Desc: "Сортер: обраний предмет іде вбік.",
-		Cost: []Stack{{Gear, 30}, {Wire, 40}}, Req: []string{"split"}, Unlocks: []Kind{KSorter}},
 	{ID: "steel", Name: "Сталеваріння", Desc: "Рецепт сталі в печі: 3 залізні пластини + вугілля.",
 		Cost: []Stack{{IronPlate, 100}, {Coal, 50}}, Req: []string{"assembler"}},
-	{ID: "belt1", Name: "Змащені стрічки", Desc: "Конвеєри й тунелі на 33% швидші.",
-		Cost: []Stack{{IronPlate, 60}, {Gear, 60}}, Req: []string{"assembler"}},
-	{ID: "belt2", Name: "Посилені приводи", Desc: "Конвеєри ще на 50% швидші.",
-		Cost: []Stack{{Steel, 40}, {Gear, 80}}, Req: []string{"belt1", "steel"}},
+	{ID: "belt1", Name: "Бруковані стежки", Desc: "Жителі й носії ходять на 25% швидше.",
+		Cost: []Stack{{Stone, 120}, {IronPlate, 40}}, Req: []string{"furnace"}},
+	{ID: "belt2", Name: "Візки", Desc: "Носії вантажних станцій беруть удвічі більше: 12 предметів.",
+		Cost: []Stack{{Gear, 60}, {IronPlate, 60}}, Req: []string{"assembler", "station"}},
 	{ID: "mine1", Name: "Загартовані бури", Desc: "Бури видобувають на 30% більше.",
 		Cost: []Stack{{IronPlate, 80}, {Gear, 40}}, Req: []string{"assembler"}},
 	{ID: "mine2", Name: "Сталеві свердла", Desc: "Бури видобувають ще на 40% більше.",
@@ -62,7 +58,7 @@ var Techs = []Tech{
 		Cost: []Stack{{Steel, 40}, {Wire, 80}, {Gear, 40}}, Req: []string{"craft1", "steel"}, Unlocks: []Kind{KAssemblerBig}},
 	{ID: "bigturret", Name: "Важка турель", Desc: "Турель 2×2: більша шкода й дальність (Tab на інструменті турелі).",
 		Cost: []Stack{{Steel, 60}, {Gear, 40}, {Ammo, 50}}, Req: []string{"turret", "steel"}, Unlocks: []Kind{KTurretBig}},
-	{ID: "repair", Name: "Самовідновлення", Desc: "Пошкоджені будівлі лагодяться вп'ятеро швидше.",
+	{ID: "repair", Name: "Ремонтна бригада", Desc: "Пошкоджені будівлі лагодяться вп'ятеро швидше.",
 		Cost: []Stack{{Gear, 60}, {Wire, 60}, {Glass, 20}}, Req: []string{"assembler"}},
 }
 
@@ -110,15 +106,6 @@ func (w *World) TechAvailable(t *Tech) bool {
 	return true
 }
 
-func (w *World) affordable(cost []Stack) bool {
-	for _, c := range cost {
-		if w.Stock[c.Item] < c.N {
-			return false
-		}
-	}
-	return true
-}
-
 var (
 	ErrResearched = errors.New("вже досліджено")
 	ErrPrereq     = errors.New("спершу дослідь попередні вузли")
@@ -138,7 +125,7 @@ func (w *World) Research(id string) error {
 		return ErrNoFunds
 	}
 	for _, c := range t.Cost {
-		w.Stock[c.Item] -= c.N
+		w.TakeStock(c.Item, c.N)
 	}
 	w.Researched[id] = true
 	return nil
@@ -152,17 +139,6 @@ func (w *World) UnlockAll() {
 }
 
 // Multipliers from research.
-
-func (w *World) BeltSpeed() float64 {
-	s := BeltSpeed
-	if w.Researched["belt1"] {
-		s *= 4.0 / 3.0
-	}
-	if w.Researched["belt2"] {
-		s *= 1.5
-	}
-	return s
-}
 
 func (w *World) MineMul() float64 {
 	m := 1.0

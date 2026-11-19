@@ -43,16 +43,14 @@ var (
 	colOK        = rgb(0x4FA3A5)
 	colBad       = rgb(0xE07A5F)
 	colAccent    = map[sim.Kind]color.RGBA{
-		sim.KBelt:      rgb(0xA79E8E),
 		sim.KMiner:     rgb(0x4FA3A5),
 		sim.KFurnace:   rgb(0xF2A65A),
 		sim.KAssembler: rgb(0x6C8EBF),
 		sim.KChest:     rgb(0xC8A97E),
 		sim.KCore:      rgb(0x2E3440),
-		sim.KTunnel:    rgb(0x5E6B78),
-		sim.KSplitter:  rgb(0x8E7CC3),
-		sim.KMerger:    rgb(0x6FAE7B),
-		sim.KSorter:    rgb(0xD4A373),
+		sim.KHouse:     rgb(0xC97B4A),
+		sim.KFarm:      rgb(0x8DB360),
+		sim.KStation:   rgb(0xD4A373),
 	}
 )
 
@@ -209,6 +207,12 @@ func drawItem(dst *ebiten.Image, it sim.Item, cx, cy, s float32) {
 			fillPath(dst, rgb(0xB87333))
 			strokeRoundRect(dst, bx-h*0.24, cy-h*0.35, h*0.48, h*1.15, h*0.1, max32(1, s*0.05), dark)
 		}
+	case sim.ShapeFood:
+		fillRoundRect(dst, cx-h*0.6, cy-h*0.45, h*1.2, h*1.25, h*0.45, c)
+		strokeRoundRect(dst, cx-h*0.6, cy-h*0.45, h*1.2, h*1.25, h*0.45, max32(1, s*0.06), dark)
+		line(dst, cx-h*0.35, cy-h*0.45, cx+h*0.35, cy-h*0.45, max32(1, s*0.08), dark)
+		line(dst, cx, cy-h*0.45, cx-h*0.2, cy-h*0.85, max32(1, s*0.06), rgb(0x8DB360))
+		line(dst, cx, cy-h*0.45, cx+h*0.25, cy-h*0.8, max32(1, s*0.06), rgb(0x8DB360))
 	case sim.ShapeCoil:
 		fillCircle(dst, cx, cy, h*0.8, c)
 		strokeCircle(dst, cx, cy, h*0.55, max32(1, s*0.08), dark)

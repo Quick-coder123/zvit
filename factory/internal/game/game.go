@@ -57,8 +57,9 @@ type Game struct {
 	clipW     int
 	clipH     int
 	pasting   bool
-	iconMode  bool // drawing toolbar icons, not the world
-	research  bool // research panel open
+	iconMode  bool               // drawing toolbar icons, not the world
+	research  bool               // research panel open
+	stock     [sim.ItemCount]int // totals across storages, refreshed each frame
 
 	confirmNew  bool        // "start over?" dialog
 	checkUpdate func() bool // reports a new build in the game folder
@@ -170,6 +171,9 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	for it := range g.stock {
+		g.stock[it] = g.w.TotalStock(sim.Item(it))
+	}
 	g.drawWorld(screen)
 	g.drawGhost(screen)
 	g.drawUI(screen)
@@ -302,6 +306,16 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyT) {
 		g.research = !g.research
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
+		if b := g.w.At(g.hover); b != nil && sim.Builds[b.Kind].Workers > 0 && !b.Site {
+			g.w.SetPaused(b.ID, !b.Paused)
+			if b.Paused {
+				g.say("%s на паузі — працівники вільні", sim.Builds[b.Kind].Name)
+			} else {
+				g.say("%s знову працює", sim.Builds[b.Kind].Name)
+			}
+		}
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyB) && len(g.w.Ruins) > 0 {
 		g.rebuild()
 	}
@@ -340,8 +354,6 @@ func (g *Game) handleInput() {
 			} else {
 				g.say("Буфер порожній: затисни Ctrl і виділи ділянку лівою кнопкою")
 			}
-		} else if b := g.w.At(g.hover); b != nil && b.Kind == sim.KBelt {
-			g.say("Лінію розвернуто: %d клітинок", g.w.ReverseLine(b))
 		}
 	}
 
@@ -390,16 +402,12 @@ func (g *Game) handleInput() {
 		} else if g.dragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 			p := g.footprint(g.tool)
 			if p != g.dragLast {
-				if g.tool == sim.KBelt {
-					g.dragBelts(p)
-				} else {
-					g.tryPlace(p, g.dir, false)
-				}
+				g.tryPlace(p, g.dir, false)
 				g.dragLast = p
 			}
 		}
 	} else if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		if b := g.w.At(g.hover); b != nil && b.Kind != sim.KBelt {
+		if b := g.w.At(g.hover); b != nil {
 			g.selected = b.ID
 		} else {
 			g.selected = 0
@@ -454,27 +462,6 @@ func (g *Game) tryPlace(p sim.Pos, d sim.Dir, loud bool) bool {
 		return false
 	}
 	return true
-}
-
-// dragBelts lays belts from dragLast to p, turning the line as the mouse moves.
-func (g *Game) dragBelts(p sim.Pos) {
-	cur := g.dragLast
-	for steps := 0; cur != p && steps < 200; steps++ {
-		var next sim.Pos
-		ax, ay := p.X-cur.X, p.Y-cur.Y
-		if abs(ax) >= abs(ay) {
-			next = sim.Pos{X: cur.X + sign(ax), Y: cur.Y}
-		} else {
-			next = sim.Pos{X: cur.X, Y: cur.Y + sign(ay)}
-		}
-		d, _ := sim.DirBetween(cur, next)
-		g.dir = d
-		if b := g.w.At(cur); b != nil && b.Kind == sim.KBelt {
-			g.w.Place(sim.KBelt, cur, d, 0)
-		}
-		g.tryPlace(next, d, false)
-		cur = next
-	}
 }
 
 func abs(a int) int {
@@ -605,14 +592,8 @@ func (g *Game) drawGhost(dst *ebiten.Image) {
 		a := g.pasteAnchor()
 		for _, sp := range g.clip {
 			p := sp.Pos.Add(a.X, a.Y)
-			gb := &sim.Building{Kind: sp.Kind, Pos: p, Dir: sp.Dir, Recipe: sp.Recipe, Filter: sp.Filter, Exit: sp.Exit}
-			if sp.Kind == sim.KBelt {
-				x, y := g.cam.ToScreen(float64(p.X), float64(p.Y))
-				straightBase(dst, x, y, s, sp.Dir, rgba(0xD8D1C4, 0x99))
-				triangle(dst, x+s/2, y+s/2, dirAngle(sp.Dir), s*0.35, rgba(0xBDB3A2, 0xBB))
-			} else {
-				g.drawBuilding(dst, gb, 0.55)
-			}
+			gb := &sim.Building{Kind: sp.Kind, Pos: p, Dir: sp.Dir, Recipe: sp.Recipe}
+			g.drawBuilding(dst, gb, 0.55)
 			if g.w.CheckPlace(sp.Kind, p, sp.Dir) != nil {
 				x, y := g.cam.ToScreen(float64(p.X), float64(p.Y))
 				w := s * float32(sim.Builds[sp.Kind].Size)
@@ -634,8 +615,6 @@ func (g *Game) drawGhost(dst *ebiten.Image) {
 	switch g.tool {
 	case sim.KMiner, sim.KMinerBig:
 		ghost.MinerItem = g.w.OreAt(p)
-	case sim.KTunnel:
-		ghost.Exit = g.w.TunnelWouldExit(p, g.dir)
 	}
 	ok := g.w.CheckPlace(g.tool, p, g.dir) == nil
 	g.drawBuilding(dst, ghost, 0.6)

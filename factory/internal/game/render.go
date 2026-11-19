@@ -83,29 +83,12 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 		return b.Pos.X+sz >= tx0 && b.Pos.X <= tx1 && b.Pos.Y+sz >= ty0 && b.Pos.Y <= ty1
 	}
 	order := g.w.Order()
-	// belts first, then their items, then machines on top
 	for _, id := range order {
-		b := g.w.Buildings[id]
-		if b.Kind == sim.KBelt && view(b) {
-			g.drawBelt(dst, b)
-		}
-	}
-	for _, id := range order {
-		b := g.w.Buildings[id]
-		if b.Kind == sim.KBelt && view(b) {
-			for _, bi := range b.Belt {
-				x, y := beltItemPos(b, bi.P)
-				sx, sy := cam.ToScreen(x, y)
-				drawItem(dst, bi.Item, sx, sy, s*0.38)
-			}
-		}
-	}
-	for _, id := range order {
-		b := g.w.Buildings[id]
-		if b.Kind != sim.KBelt && view(b) {
+		if b := g.w.Buildings[id]; view(b) {
 			g.drawBuilding(dst, b, 1)
 		}
 	}
+	g.drawSettlers(dst)
 	g.drawEnemies(dst)
 	g.drawShots(dst)
 	for _, id := range order {
@@ -113,75 +96,8 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 			g.drawHPBar(dst, b)
 		}
 	}
+	g.drawStationRange(dst)
 	g.drawThreats(dst)
-}
-
-// beltItemPos returns tile-space coordinates for an item at progress p.
-func beltItemPos(b *sim.Building, p float32) (float64, float64) {
-	cx, cy := float64(b.Pos.X)+0.5, float64(b.Pos.Y)+0.5
-	d := b.Dir
-	dx, dy := float64(d.DX()), float64(d.DY())
-	if b.Curve == 0 {
-		t := float64(p) - 0.5
-		return cx + dx*t, cy + dy*t
-	}
-	side := d.CCW()
-	if b.Curve == 1 {
-		side = d.CW()
-	}
-	sx, sy := float64(side.DX()), float64(side.DY())
-	// arc centred on the corner between entry side and exit side
-	ccx, ccy := cx+sx*0.5+dx*0.5, cy+sy*0.5+dy*0.5
-	a := float64(p) * math.Pi / 2
-	ux, uy := -dx, -dy
-	vx, vy := -sx, -sy
-	return ccx + 0.5*(ux*math.Cos(a)+vx*math.Sin(a)), ccy + 0.5*(uy*math.Cos(a)+vy*math.Sin(a))
-}
-
-func (g *Game) drawBelt(dst *ebiten.Image, b *sim.Building) {
-	cam := &g.cam
-	s := float32(cam.Scale)
-	sx, sy := cam.ToScreen(float64(b.Pos.X), float64(b.Pos.Y))
-	phase := float32(math.Mod(float64(g.w.Tick)*sim.BeltSpeed/sim.TPS, 0.5))
-	if b.Curve == 0 {
-		if b.Dir == sim.North || b.Dir == sim.South {
-			fillRoundRect(dst, sx+s*0.1, sy+s*0.02, s*0.8, s*0.96, s*0.1, colBeltBase)
-		} else {
-			fillRoundRect(dst, sx+s*0.02, sy+s*0.1, s*0.96, s*0.8, s*0.1, colBeltBase)
-		}
-		if s >= 10 {
-			a := dirAngle(b.Dir)
-			for k := 0; k < 2; k++ {
-				t := float32(k)*0.5 + phase + 0.25
-				x, y := beltItemPos(b, t)
-				px, py := cam.ToScreen(x, y)
-				chevron(dst, px, py, a, s*0.3, max32(1, s*0.06), colChevron)
-			}
-		}
-		return
-	}
-	// curved belt: thick quarter arc
-	const steps = 10
-	for i := 0; i <= steps; i++ {
-		x, y := beltItemPos(b, float32(i)/steps)
-		px, py := cam.ToScreen(x, y)
-		if i == 0 {
-			path.MoveTo(px, py)
-		} else {
-			path.LineTo(px, py)
-		}
-	}
-	strokePath(dst, s*0.8, colBeltBase)
-	if s >= 10 {
-		for k := 0; k < 2; k++ {
-			t := float32(k)*0.5 + phase + 0.25
-			x, y := beltItemPos(b, t)
-			x2, y2 := beltItemPos(b, t+0.01)
-			px, py := cam.ToScreen(x, y)
-			a := float32(math.Atan2(y2-y, x2-x))
-			chevron(dst, px, py, a, s*0.3, max32(1, s*0.06), colChevron)
-		}
-	}
 }
 
 // drawBuilding draws a machine. alpha < 1 is used for placement ghosts.
@@ -202,17 +118,12 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	bx, by, bw := x+pad, y+pad, w-2*pad
 	t := float64(g.w.Tick) / sim.TPS
 
+	if b.Site && alpha >= 1 {
+		g.drawSite(dst, b)
+		return
+	}
+
 	switch b.Kind {
-	case sim.KBelt:
-		fillRoundRect(dst, bx, by, bw, bw, s*0.12, fade(colBeltBase))
-		triangle(dst, x+w/2, y+w/2, dirAngle(b.Dir), s*0.4, fade(colChevron))
-		return
-	case sim.KTunnel:
-		g.drawTunnel(dst, b, x, y, s, fade)
-		return
-	case sim.KSplitter, sim.KMerger, sim.KSorter:
-		g.drawRouter(dst, b, x, y, s, fade)
-		return
 	case sim.KWall:
 		stone := rgb(0xB9AE9E)
 		fillRoundRect(dst, x+s*0.03, y+s*0.07, s*0.94, s*0.94, s*0.12, fade(rgba(0x2E3440, 0x26)))
@@ -276,10 +187,39 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	case sim.KChest:
 		fillRoundRect(dst, bx+bw*0.1, by+bw*0.18, bw*0.8, bw*0.64, s*0.08, fade(mix(colBody, acc, 0.35)))
 		line(dst, bx+bw*0.1, by+bw*0.38, bx+bw*0.9, by+bw*0.38, max32(1, s*0.05), fade(mix(acc, colInk, 0.4)))
-		fill := float32(b.StoreCount()) / sim.ChestCap
+		fill := float32(b.StoreCount()) / float32(g.w.ChestCapacity())
 		if fill > 0 {
 			fillRect(dst, bx+bw*0.15, by+bw*0.76-bw*0.3*fill, bw*0.7, bw*0.3*fill, fade(acc))
 		}
+	case sim.KHouse:
+		roof := fade(rgb(0xC97B4A))
+		path.MoveTo(cx, by+bw*0.12)
+		path.LineTo(bx+bw*0.88, cy)
+		path.LineTo(bx+bw*0.12, cy)
+		path.Close()
+		fillPath(dst, roof)
+		fillRect(dst, bx+bw*0.22, cy, bw*0.56, bw*0.34, fade(mix(colBody, rgb(0xC97B4A), 0.15)))
+		fillRoundRect(dst, cx-bw*0.08, cy+bw*0.12, bw*0.16, bw*0.22, s*0.03, fade(rgb(0x6B4F3A)))
+	case sim.KFarm:
+		field := fade(rgb(0xE8D9A0))
+		fillRoundRect(dst, bx+bw*0.08, by+bw*0.08, bw*0.84, bw*0.84, s*0.1, field)
+		for row := 0; row < 3; row++ {
+			ry := by + bw*(0.25+float32(row)*0.25)
+			for k := 0; k < 4; k++ {
+				sway := float32(math.Sin(t*2+float64(row+k))) * bw * 0.02
+				px := bx + bw*(0.2+float32(k)*0.2)
+				line(dst, px, ry+bw*0.08, px+sway, ry-bw*0.06, max32(1, s*0.05), fade(rgb(0x8DB360)))
+				if b.Progress > 0.5 {
+					fillCircle(dst, px+sway, ry-bw*0.07, max32(1, s*0.04), fade(rgb(0xC9A227)))
+				}
+			}
+		}
+	case sim.KStation:
+		// a little cart
+		fillRoundRect(dst, cx-bw*0.3, cy-bw*0.2, bw*0.6, bw*0.32, s*0.06, fade(acc))
+		fillCircle(dst, cx-bw*0.18, cy+bw*0.18, bw*0.1, fade(colInk))
+		fillCircle(dst, cx+bw*0.18, cy+bw*0.18, bw*0.1, fade(colInk))
+		line(dst, cx+bw*0.3, cy-bw*0.12, cx+bw*0.42, cy-bw*0.28, max32(1, s*0.05), fade(colInk))
 	case sim.KCore:
 		pulse := float32(0.5 + 0.5*math.Sin(t*1.2))
 		r := w * (0.2 + 0.02*pulse)
@@ -291,7 +231,7 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 		fillPath(dst, fade(colOK))
 		strokeCircle(dst, cx, cy, w*0.33, max32(1, s*0.05), fade(rgba(0x4FA3A5, 0x88)))
 		if s >= 16 {
-			drawText(dst, "ЯДРО", float64(cx), float64(by+bw*0.06), float64(s)*0.32, true, fade(rgb(0xD8DEE9)), alignCenter)
+			drawText(dst, "РАТУША", float64(cx), float64(by+bw*0.06), float64(s)*0.3, true, fade(rgb(0xD8DEE9)), alignCenter)
 		}
 	}
 
@@ -308,125 +248,132 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 		}
 	}
 
-	// output arrow on the front face
-	if base := b.Kind.Base(); base != sim.KCore && base != sim.KTurret && base != sim.KFlamer {
-		a := dirAngle(b.Dir)
-		ax := cx + float32(b.Dir.DX())*(bw/2-s*0.02)
-		ay := cy + float32(b.Dir.DY())*(bw/2-s*0.02)
-		triangle(dst, ax, ay, a, s*0.28, fade(mix(acc, colInk, 0.35)))
+	if alpha >= 1 && !g.iconMode {
+		g.drawStatus(dst, b, x, y, w)
 	}
 }
 
-// straightBase draws a belt strip across a 1x1 tile in direction d.
-func straightBase(dst *ebiten.Image, x, y, s float32, d sim.Dir, c color.RGBA) {
-	if d == sim.North || d == sim.South {
-		fillRoundRect(dst, x+s*0.1, y+s*0.02, s*0.8, s*0.96, s*0.1, c)
-	} else {
-		fillRoundRect(dst, x+s*0.02, y+s*0.1, s*0.96, s*0.8, s*0.1, c)
-	}
-}
-
-// halfRect returns the half of a tile on side d (toward d).
-func halfRect(x, y, s float32, d sim.Dir) (float32, float32, float32, float32) {
-	switch d {
-	case sim.East:
-		return x + s*0.46, y + s*0.06, s * 0.5, s * 0.88
-	case sim.West:
-		return x + s*0.04, y + s*0.06, s * 0.5, s * 0.88
-	case sim.South:
-		return x + s*0.06, y + s*0.46, s * 0.88, s * 0.5
-	default:
-		return x + s*0.06, y + s*0.04, s * 0.88, s * 0.5
-	}
-}
-
-func (g *Game) drawTunnel(dst *ebiten.Image, b *sim.Building, x, y, s float32, fade func(color.RGBA) color.RGBA) {
-	acc := colAccent[sim.KTunnel]
-	straightBase(dst, x, y, s, b.Dir, fade(colBeltBase))
-	side := b.Dir
-	if b.Exit {
-		side = b.Dir.Opp()
-	}
-	hx, hy, hw, hh := halfRect(x, y, s, side)
-	fillRoundRect(dst, hx+s*0.02, hy+s*0.05, hw, hh, s*0.14, fade(rgba(0x2E3440, 0x22)))
-	fillRoundRect(dst, hx, hy, hw, hh, s*0.14, fade(acc))
-	// dark mouth facing the open belt side
-	cx, cy := hx+hw/2, hy+hh/2
-	ox := -float32(side.DX()) * s * 0.17
-	oy := -float32(side.DY()) * s * 0.17
-	if side == sim.East || side == sim.West {
-		fillRoundRect(dst, cx+ox-s*0.06, cy-s*0.3, s*0.12, s*0.6, s*0.06, fade(colInk))
-	} else {
-		fillRoundRect(dst, cx-s*0.3, cy+oy-s*0.06, s*0.6, s*0.12, s*0.06, fade(colInk))
-	}
-	triangle(dst, cx-ox*0.2, cy-oy*0.2, dirAngle(b.Dir), s*0.22, fade(mix(acc, colBG, 0.7)))
-	if b.Exit {
+// drawStatus marks paused buildings and missing workers.
+func (g *Game) drawStatus(dst *ebiten.Image, b *sim.Building, x, y, w float32) {
+	s := float32(g.cam.Scale)
+	if s < 14 {
 		return
 	}
-	// show the connection when relevant
-	if !g.iconMode && (g.tool == sim.KTunnel || g.hover == b.Pos) {
-		ex, k := g.w.TunnelExit(b)
-		c := rgba(0x5E6B78, 0x99)
-		if ex == nil {
-			c = rgba(0xE07A5F, 0x99)
-			k = sim.TunnelMax + 1
+	r := max32(5, s*0.17)
+	cx, cy := x+w-r*0.6, y+r*0.6
+	switch {
+	case b.Paused:
+		fillCircle(dst, cx, cy, r, rgba(0x2E3440, 0xDD))
+		fillRect(dst, cx-r*0.4, cy-r*0.45, r*0.28, r*0.9, colBG)
+		fillRect(dst, cx+r*0.12, cy-r*0.45, r*0.28, r*0.9, colBG)
+	case sim.Builds[b.Kind].Workers > 0 && b.Kind != sim.KStation && b.Inside() < sim.Builds[b.Kind].Workers:
+		fillCircle(dst, cx, cy, r, rgba(0xE07A5F, 0xE6))
+		personGlyph(dst, cx, cy, r*0.9, colBody)
+	}
+}
+
+func personGlyph(dst *ebiten.Image, cx, cy, r float32, c color.RGBA) {
+	fillCircle(dst, cx, cy-r*0.35, r*0.25, c)
+	fillRoundRect(dst, cx-r*0.32, cy-r*0.05, r*0.64, r*0.55, r*0.2, c)
+}
+
+// drawSite shows a construction site: a faint outline of the future
+// building with progress.
+func (g *Game) drawSite(dst *ebiten.Image, b *sim.Building) {
+	s := float32(g.cam.Scale)
+	x, y := g.cam.ToScreen(float64(b.Pos.X), float64(b.Pos.Y))
+	w := s * float32(b.Size())
+	g.drawBuilding(dst, b, 0.35)
+	// scaffolding corners
+	c := rgba(0xA3785B, 0xDD)
+	lw := max32(1.5, s*0.06)
+	m := w * 0.22
+	for _, p := range [][4]float32{{x + 2, y + 2, 1, 1}, {x + w - 2, y + 2, -1, 1}, {x + 2, y + w - 2, 1, -1}, {x + w - 2, y + w - 2, -1, -1}} {
+		line(dst, p[0], p[1], p[0]+p[2]*m, p[1], lw, c)
+		line(dst, p[0], p[1], p[0], p[1]+p[3]*m, lw, c)
+	}
+	// progress: materials first, then building work
+	total, left := 0, 0
+	for _, st := range sim.Builds[b.Kind].Cost {
+		total += st.N
+	}
+	for _, st := range b.Need {
+		left += st.N
+	}
+	frac := float32(1)
+	if total > 0 && !b.FreeBuilt {
+		frac = float32(total-left) / float32(total)
+	}
+	bx, by, bw := x+w*0.12, y+w-max32(5, s*0.16), w*0.76
+	bh := max32(3, s*0.08)
+	fillRoundRect(dst, bx, by, bw, bh, bh/2, rgba(0x2E3440, 0x66))
+	fillRoundRect(dst, bx, by, bw*frac*0.5+bw*0.5*b.BuildWork, bh, bh/2, rgb(0xC9A227))
+}
+
+// drawSettlers draws everyone who is outside a building.
+func (g *Game) drawSettlers(dst *ebiten.Image) {
+	s := float32(g.cam.Scale)
+	t := float64(g.w.Tick) / sim.TPS
+	for _, st := range g.w.Settlers {
+		if st.Inside {
+			continue
 		}
-		for i := 1; i < k; i++ {
-			p := b.Pos
-			for j := 0; j < i; j++ {
-				p = p.Step(b.Dir)
-			}
-			px, py := g.cam.ToScreen(float64(p.X)+0.5, float64(p.Y)+0.5)
-			fillCircle(dst, px, py, s*0.07, fade(c))
+		x, y := g.cam.ToScreen(st.X, st.Y)
+		if float64(x) < -20 || float64(y) < -20 || float64(x) > g.cam.W+20 || float64(y) > g.cam.H+20 {
+			continue
+		}
+		r := max32(3, s*0.18)
+		body := rgb(0x4FA3A5) // free
+		switch {
+		case g.isCarrier(st):
+			body = rgb(0xD4A373)
+		case st.Job != 0:
+			body = rgb(0x6C8EBF)
+		case st.Task == sim.TaskBuild:
+			body = rgb(0xA3785B)
+		}
+		bob := float32(math.Sin(t*9+float64(st.Seed))) * r * 0.15
+		fillCircle(dst, x, y+r*0.9, r*0.9, rgba(0x2E3440, 0x22))
+		fillRoundRect(dst, x-r*0.7, y-r*0.2+bob, r*1.4, r*1.3, r*0.5, body)
+		fillCircle(dst, x, y-r*0.65+bob, r*0.55, rgb(0xF1D9C0))
+		if st.Starved() {
+			strokeCircle(dst, x, y, r*1.5, max32(1, s*0.03), colBad)
+		}
+		if st.Carry.N > 0 {
+			drawItem(dst, st.Carry.Item, x, y-r*1.7+bob, max32(6, s*0.3))
+		}
+		if st.Task == sim.TaskBuild && s >= 16 {
+			a := float32(math.Sin(t * 10))
+			line(dst, x+r*0.6, y-r*0.2, x+r*1.3, y-r*(0.8+0.4*a), max32(1, s*0.04), colInk)
 		}
 	}
 }
 
-// arrowTo draws a line from (cx,cy) toward direction d with an arrowhead.
-func arrowTo(dst *ebiten.Image, cx, cy, s float32, d sim.Dir, out bool, c color.RGBA) {
-	ex := cx + float32(d.DX())*s*0.34
-	ey := cy + float32(d.DY())*s*0.34
-	line(dst, cx, cy, ex, ey, max32(1.2, s*0.07), c)
-	a := dirAngle(d)
-	if out {
-		triangle(dst, ex, ey, a, s*0.2, c)
-	} else {
-		triangle(dst, (cx+ex)/2, (cy+ey)/2, a+math.Pi, s*0.18, c)
-	}
+func (g *Game) isCarrier(st *sim.Settler) bool {
+	b := g.w.Buildings[st.Job]
+	return b != nil && b.Kind == sim.KStation
 }
 
-func (g *Game) drawRouter(dst *ebiten.Image, b *sim.Building, x, y, s float32, fade func(color.RGBA) color.RGBA) {
-	acc := colAccent[b.Kind]
-	fillRoundRect(dst, x+s*0.04, y+s*0.04, s*0.92, s*0.92, s*0.14, fade(colBeltBase))
-	fillRoundRect(dst, x+s*0.12, y+s*0.15, s*0.76, s*0.76, s*0.16, fade(rgba(0x2E3440, 0x20)))
-	fillRoundRect(dst, x+s*0.12, y+s*0.12, s*0.76, s*0.76, s*0.16, fade(colBody))
-	strokeRoundRect(dst, x+s*0.12, y+s*0.12, s*0.76, s*0.76, s*0.16, max32(1, s*0.05), fade(mix(acc, colInk, 0.3)))
-	cx, cy := x+s/2, y+s/2
-	ink := fade(mix(acc, colInk, 0.35))
-	switch b.Kind {
-	case sim.KSplitter:
-		arrowTo(dst, cx, cy, s, b.Dir.CCW(), true, fade(acc))
-		arrowTo(dst, cx, cy, s, b.Dir.CW(), true, fade(acc))
-		arrowTo(dst, cx, cy, s, b.Dir, true, ink)
-		fillCircle(dst, cx, cy, s*0.08, ink)
-	case sim.KMerger:
-		arrowTo(dst, cx, cy, s, b.Dir.CCW(), false, fade(acc))
-		arrowTo(dst, cx, cy, s, b.Dir.CW(), false, fade(acc))
-		arrowTo(dst, cx, cy, s, b.Dir.Opp(), false, fade(acc))
-		arrowTo(dst, cx, cy, s, b.Dir, true, ink)
-	case sim.KSorter:
-		for _, d := range []sim.Dir{b.Dir.CCW(), b.Dir.CW()} {
-			ex := cx + float32(d.DX())*s*0.3
-			ey := cy + float32(d.DY())*s*0.3
-			triangle(dst, ex, ey, dirAngle(d), s*0.14, fade(acc))
-		}
-		ex := cx + float32(b.Dir.DX())*s*0.3
-		ey := cy + float32(b.Dir.DY())*s*0.3
-		triangle(dst, ex, ey, dirAngle(b.Dir), s*0.16, ink)
-		if b.Filter != sim.ItemNone {
-			drawItem(dst, b.Filter, cx, cy, s*0.32)
-		} else if s >= 16 {
-			drawText(dst, "?", float64(cx), float64(cy-s*0.2), float64(s)*0.34, true, ink, alignCenter)
-		}
+// drawStationRange shows the reach of the selected or hovered station.
+func (g *Game) drawStationRange(dst *ebiten.Image) {
+	var b *sim.Building
+	if sel := g.w.Buildings[g.selected]; sel != nil && sel.Kind == sim.KStation {
+		b = sel
+	} else if h := g.w.At(g.hover); h != nil && h.Kind == sim.KStation {
+		b = h
 	}
+	s := float32(g.cam.Scale)
+	var cx, cy float32
+	switch {
+	case b != nil:
+		cx, cy = g.cam.ToScreen(float64(b.Pos.X)+0.5, float64(b.Pos.Y)+0.5)
+	case g.tool == sim.KStation && !g.overUI:
+		p := g.footprint(sim.KStation)
+		cx, cy = g.cam.ToScreen(float64(p.X)+0.5, float64(p.Y)+0.5)
+	default:
+		return
+	}
+	r := s * sim.StationRadius
+	fillCircle(dst, cx, cy, r, rgba(0xD4A373, 0x18))
+	strokeCircle(dst, cx, cy, r, max32(1.5, s*0.05), rgba(0xD4A373, 0xAA))
 }
