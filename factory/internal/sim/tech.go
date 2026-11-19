@@ -58,6 +58,8 @@ var Techs = []Tech{
 		Cost: []Stack{{Steel, 40}, {Wire, 80}, {Gear, 40}}, Req: []string{"craft1", "steel"}, Unlocks: []Kind{KAssemblerBig}},
 	{ID: "bigturret", Name: "Важка турель", Desc: "Турель 2×2: більша шкода й дальність.",
 		Cost: []Stack{{Steel, 60}, {Gear, 40}, {Ammo, 50}}, Req: []string{"turret", "steel"}, Unlocks: []Kind{KTurretBig}},
+	{ID: "purify", Name: "Очищення води", Desc: "Очисник: питна вода навіть із каламутної річки.",
+		Cost: []Stack{{Planks, 20}, {Stone, 20}}, Req: []string{"furnace"}, Unlocks: []Kind{KPurifier}},
 	{ID: "bakery", Name: "Хлібопекарство", Desc: "Пекарня: хліб з овочів — третя страва для різноманітного раціону.",
 		Cost: []Stack{{Planks, 15}, {Food, 20}}, Unlocks: []Kind{KBakery}},
 	{ID: "arts", Name: "Мистецтво", Desc: "Статуя: велика прикраса, що робить жителів щасливішими.",

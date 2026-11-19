@@ -16,11 +16,14 @@ const (
 	sourceRate   = 0.9    // depth added per second to each spring tile
 	evapWet      = 0.0002 // depth evaporating per second
 	evapDrought  = 0.004
-	MoistRange   = 4    // tiles from water that count as moist soil
-	PumpTime     = 3.0  // seconds per water item
-	PumpDraw     = 0.08 // depth taken from the water per item
-	FloodDepth   = 0.3  // buildings under this much water stop working
-	BuildMaxWet  = 0.2  // most buildings can't be placed in deeper water
+	contDecay    = 0.004 // contamination fading per second
+	DirtyWater   = 0.3   // pumps and soil reject water dirtier than this
+	MoistRange   = 4     // tiles from water that count as moist soil
+	PumpTime     = 3.0   // seconds per water item
+	PurifyTime   = 5.0   // a purifier is slower but takes any water
+	PumpDraw     = 0.08  // depth taken from the water per item
+	FloodDepth   = 0.3   // buildings under this much water stop working
+	BuildMaxWet  = 0.2   // most buildings can't be placed in deeper water
 	PumpMinDepth = 0.15
 )
 
@@ -120,7 +123,7 @@ func waterBlock(k Kind) float32 {
 	switch k {
 	case KDam:
 		return 1
-	case KLevee:
+	case KLevee, KGate:
 		return 3
 	}
 	return 0
@@ -131,7 +134,7 @@ func (w *World) rebuildWalls() {
 		w.wall[i] = 0
 	}
 	for _, b := range w.Buildings {
-		if blk := waterBlock(b.Kind); blk > 0 && !b.Site {
+		if blk := waterBlock(b.Kind); blk > 0 && !b.Site && !(b.Kind == KGate && b.GateOpen) {
 			if i, ok := regionIndex(b.Pos); ok {
 				w.wall[i] = blk
 			}
@@ -197,7 +200,18 @@ func (w *World) stepWater(drought bool) {
 			}
 		}
 	}
-	// 2. move water
+	// 2. move water (and the contamination it carries)
+	if len(w.Cont) != n {
+		w.Cont = make([]float32, n)
+	}
+	cont := w.Cont
+	if len(w.massBuf) != n {
+		w.massBuf = make([]float32, n)
+	}
+	mass := w.massBuf
+	for i := 0; i < n; i++ {
+		mass[i] = water[i] * cont[i]
+	}
 	for i := 0; i < n; i++ {
 		x, y := i%WRegion, i/WRegion
 		in := float32(0)
@@ -218,7 +232,35 @@ func (w *World) stepWater(drought bool) {
 		if in == 0 && out == 0 && water[i] == 0 {
 			continue
 		}
+		// contaminant mass moves with the water
+		min := float32(0)
+		if x > 0 {
+			min += flux[4*(i-1)+0] * cont[i-1]
+		}
+		if x < WRegion-1 {
+			min += flux[4*(i+1)+1] * cont[i+1]
+		}
+		if y > 0 {
+			min += flux[4*(i-WRegion)+2] * cont[i-WRegion]
+		}
+		if y < WRegion-1 {
+			min += flux[4*(i+WRegion)+3] * cont[i+WRegion]
+		}
+		mass[i] += dt * (min - out*cont[i])
 		water[i] += dt * (in - out)
+	}
+	for i := 0; i < n; i++ {
+		if water[i] > 1e-4 {
+			c := mass[i] / water[i] * (1 - contDecay*dt)
+			if c < 0.002 {
+				c = 0
+			} else if c > 1 {
+				c = 1
+			}
+			cont[i] = c
+		} else {
+			cont[i] = 0
+		}
 	}
 	evap := float32(evapWet)
 	if drought {
@@ -236,7 +278,13 @@ func (w *World) stepWater(drought bool) {
 	}
 	if !drought {
 		for _, i := range w.springs {
-			water[i] += sourceRate * dt
+			add := sourceRate * dt
+			c := float32(0)
+			if w.Polluted {
+				c = 1
+			}
+			cont[i] = (cont[i]*water[i] + c*add) / (water[i] + add)
+			water[i] += add
 		}
 	}
 	for _, i := range w.sinks {
@@ -251,7 +299,7 @@ func (w *World) updateMoisture() {
 	queue := make([]int, 0, 4096)
 	for i := 0; i < n; i++ {
 		dist[i] = -1
-		if w.Water[i] > 0.05 {
+		if w.Water[i] > 0.05 && (len(w.Cont) != n || w.Cont[i] < DirtyWater) {
 			dist[i] = 0
 			queue = append(queue, i)
 		}
@@ -291,24 +339,54 @@ func (w *World) WetLength(cycle int) float64 {
 
 func DroughtLength(cycle int) float64 { return math.Min(300, 120+30*float64(cycle)) }
 
+// PollutedLength is how long a season of muddy water lasts.
+func PollutedLength(cycle int) float64 { return math.Min(240, 90+20*float64(cycle)) }
+
+// nextPolluted decides whether the coming hazard is muddy water rather
+// than a drought (from the third cycle on, about a third of the time).
+func (w *World) nextPolluted() bool {
+	return w.Cycle >= 2 && unit(hash3(w.Seed, w.Cycle, 1, 919)) < 0.35
+}
+
+// ContAt returns how dirty the water on a tile is (0 clean .. 1 muddy).
+func (w *World) ContAt(p Pos) float64 {
+	if i, ok := regionIndex(p); ok && len(w.Cont) == WRegion*WRegion {
+		return float64(w.Cont[i])
+	}
+	return 0
+}
+
 func (w *World) updateSeasons() {
 	if w.SeasonLeft <= 0 && !w.Drought && w.Cycle == 0 && w.Tick < 2 {
 		w.SeasonLeft = w.WetLength(0)
 	}
 	prev := w.SeasonLeft
 	w.SeasonLeft -= DT
-	if !w.Drought && prev > 60 && w.SeasonLeft <= 60 {
-		w.notice("Посуха за хвилину! Запасіть воду й їжу.")
+	if !w.Drought && !w.Polluted && prev > 60 && w.SeasonLeft <= 60 {
+		if w.nextPolluted() {
+			w.notice("За хвилину річка стане каламутною! Закрийте шлюзи, запасіть чисту воду.")
+		} else {
+			w.notice("Посуха за хвилину! Запасіть воду й їжу.")
+		}
 	}
 	if w.SeasonLeft > 0 {
 		return
 	}
-	if w.Drought {
-		w.Drought = false
+	switch {
+	case w.Drought || w.Polluted:
+		if w.Polluted {
+			w.notice("Каламутна вода минула — річка поступово очиститься.")
+		} else {
+			w.notice("Посуха скінчилась — річка знову наповнюється.")
+		}
+		w.Drought, w.Polluted = false, false
 		w.Cycle++
 		w.SeasonLeft = w.WetLength(w.Cycle)
-		w.notice("Посуха скінчилась — річка знову наповнюється.")
-	} else {
+	case w.nextPolluted():
+		w.Polluted = true
+		w.SeasonLeft = PollutedLength(w.Cycle)
+		w.notice("Річка каламутна! Насоси не беруть брудну воду, вона не зволожує ґрунт.")
+	default:
 		w.Drought = true
 		w.SeasonLeft = DroughtLength(w.Cycle)
 		w.notice("Почалась посуха! Річка міліє, поля без вологи не родять.")
@@ -332,7 +410,11 @@ func (w *World) pumpSource(b *Building) (int, bool) {
 	found := false
 	for dy := -1; dy <= b.Size(); dy++ {
 		for dx := -1; dx <= b.Size(); dx++ {
-			if i, ok := regionIndex(b.Pos.Add(dx, dy)); ok && w.Water[i] >= bd {
+			i, ok := regionIndex(b.Pos.Add(dx, dy))
+			if ok && b.Kind == KPump && len(w.Cont) == len(w.Water) && w.Cont[i] >= DirtyWater {
+				continue
+			}
+			if ok && w.Water[i] >= bd {
 				best, bd, found = i, w.Water[i], true
 			}
 		}
@@ -351,7 +433,11 @@ func (w *World) stepPump(b *Building) {
 		return
 	}
 	b.Working = true
-	b.Progress += float32(DT * w.workRate(b) / PumpTime)
+	t := PumpTime
+	if b.Kind == KPurifier {
+		t = PurifyTime
+	}
+	b.Progress += float32(DT * w.workRate(b) / t)
 	if b.Progress >= 1 {
 		b.Progress = 0
 		w.Water[i] = float32(math.Max(0, float64(w.Water[i])-PumpDraw))
@@ -362,7 +448,7 @@ func (w *World) stepPump(b *Building) {
 
 // Flooded reports whether water covers a building that can't stand in it.
 func (w *World) Flooded(b *Building) bool {
-	if b.Kind == KPump || waterBlock(b.Kind) > 0 {
+	if b.Kind == KPump || b.Kind == KPurifier || waterBlock(b.Kind) > 0 {
 		return false
 	}
 	for y := 0; y < b.Size(); y++ {

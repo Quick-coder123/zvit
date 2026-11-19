@@ -37,6 +37,8 @@ const (
 	KFlowerbed
 	KStatue
 	KBakery
+	KPurifier
+	KGate
 	KindCount
 )
 
@@ -142,6 +144,16 @@ var Builds = [KindCount]BuildDef{
 		Name: "Насип", Size: 1, Buildable: true, HP: 400,
 		Desc: "Висока земляна стіна: вода крізь неї не проходить. Захищає від затоплення.",
 		Cost: []Stack{{Stone, 6}, {Wood, 2}},
+	},
+	KPurifier: {
+		Name: "Очисник", Size: 1, Buildable: true, HP: 200, Workers: 1,
+		Desc: "Як насос, але бере й каламутну воду, очищуючи її. Повільніший: 1 вода за 5 с.",
+		Cost: []Stack{{Planks, 10}, {IronPlate, 6}, {Stone, 6}},
+	},
+	KGate: {
+		Name: "Шлюз", Size: 1, Buildable: true, HP: 400,
+		Desc: "Стіна для води, яку можна відкривати й закривати: не пускайте каламутну воду у водосховище.",
+		Cost: []Stack{{Planks, 6}, {Stone, 8}},
 	},
 	KCampfire: {
 		Name: "Вогнище", Size: 1, Buildable: true, HP: 100,

@@ -135,3 +135,73 @@ func TestBuildingsFloodAndWaterSaved(t *testing.T) {
 		t.Fatal("water not saved")
 	}
 }
+
+func TestMuddyWaterSeason(t *testing.T) {
+	w := NewWorld(42)
+	pump := built(t, w, KPump, pumpSpot(w, Pos{-6, -40}))
+	w.spawnSettler(w.Core())
+	w.Polluted, w.SeasonLeft = true, 1e9
+	run(w, 120)
+	upstream := Pos{int(riverX(-49.5)), -50}
+	if w.ContAt(upstream) < 0.5 {
+		t.Fatalf("river should turn muddy, contamination %.2f", w.ContAt(upstream))
+	}
+	if _, ok := w.pumpSource(pump); ok {
+		t.Fatal("a pump must not take muddy water")
+	}
+	pur := &Building{Kind: KPurifier, Pos: pump.Pos}
+	if _, ok := w.pumpSource(pur); !ok {
+		t.Fatal("a purifier takes any water")
+	}
+	if w.MoistAt(Pos{upstream.X + 4, upstream.Y}) {
+		t.Fatal("muddy water must not moisten soil")
+	}
+	// after the season the river clears
+	w.Polluted = false
+	run(w, 240)
+	if c := w.ContAt(upstream); c > 0.2 {
+		t.Fatalf("river should clear after the season, contamination %.2f", c)
+	}
+}
+
+func TestFloodgate(t *testing.T) {
+	w := NewWorld(42)
+	var gates []*Building
+	for x := -25; x <= -5; x++ {
+		if p := (Pos{x, 10}); w.HeightAt(p) <= 1 {
+			gates = append(gates, built(t, w, KGate, p))
+		}
+	}
+	w.wallsDirty = true
+	run(w, 40)
+	closed, _ := riverStats(w, 25)
+	for _, g := range gates {
+		w.SetGate(g.ID, true)
+	}
+	run(w, 40)
+	open, _ := riverStats(w, 25)
+	t.Logf("downstream depth: closed %.2f open %.2f", closed, open)
+	if closed > 0.1 || open < 0.3 {
+		t.Fatalf("gate should block when closed and pass when open: %.2f / %.2f", closed, open)
+	}
+}
+
+func TestPollutedSeasonsComeLater(t *testing.T) {
+	w := NewWorld(42)
+	for c := 0; c < 2; c++ {
+		w.Cycle = c
+		if w.nextPolluted() {
+			t.Fatal("no muddy water in the first two cycles")
+		}
+	}
+	n := 0
+	for c := 2; c < 40; c++ {
+		w.Cycle = c
+		if w.nextPolluted() {
+			n++
+		}
+	}
+	if n < 5 || n > 25 {
+		t.Fatalf("muddy seasons %d of 38", n)
+	}
+}

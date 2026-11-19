@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 9
+const SaveVersion = 10
 
 type saveFile struct {
 	Version   int
@@ -54,6 +54,10 @@ type saveFile struct {
 	Drought    bool
 	SeasonLeft float64
 	Cycle      int
+
+	// v10
+	Polluted bool
+	Cont     []float32
 }
 
 // PosTick pairs a tile with a tick (vegetation changes in saves).
@@ -70,7 +74,8 @@ func (w *World) Encode(out io.Writer) error {
 		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills,
 		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths,
 		ResearchQueue: w.ResearchQueue, ResearchNeed: w.ResearchNeed, ResearchWork: w.ResearchWork,
-		Water: w.Water, Drought: w.Drought, SeasonLeft: w.SeasonLeft, Cycle: w.Cycle}
+		Water: w.Water, Drought: w.Drought, SeasonLeft: w.SeasonLeft, Cycle: w.Cycle,
+		Polluted: w.Polluted, Cont: w.Cont}
 	for p, t := range w.Planted {
 		sf.Planted = append(sf.Planted, PosTick{p, t})
 	}
@@ -109,7 +114,8 @@ func Decode(in io.Reader) (*World, error) {
 		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills,
 		Settlers: sf.Settlers, NextSettler: sf.NextSettler, WanderTimer: sf.WanderTimer, Deaths: sf.Deaths,
 		ResearchQueue: sf.ResearchQueue, ResearchNeed: sf.ResearchNeed, ResearchWork: sf.ResearchWork,
-		Water: sf.Water, Drought: sf.Drought, SeasonLeft: sf.SeasonLeft, Cycle: sf.Cycle}
+		Water: sf.Water, Drought: sf.Drought, SeasonLeft: sf.SeasonLeft, Cycle: sf.Cycle,
+		Polluted: sf.Polluted, Cont: sf.Cont}
 	copy(w.Stock[:], sf.Stock)
 	copy(w.Free[:], sf.Free)
 	w.Planted, w.Cleared, w.Picked = map[Pos]uint64{}, map[Pos]bool{}, map[Pos]uint64{}

@@ -35,7 +35,7 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepFlamer(b)
 		case KLab:
 			w.stepLab(b)
-		case KPump:
+		case KPump, KPurifier:
 			w.stepPump(b)
 		}
 	}

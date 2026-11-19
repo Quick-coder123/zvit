@@ -41,6 +41,7 @@ type Building struct {
 	Aim       float32 // turret barrel angle
 	Cool      float32 // weapon cooldown
 	FreeBuilt bool    // built with a starter token; refunds the token
+	GateOpen  bool    // floodgate lets water through
 
 	// transient, rebuilt every allocation pass / on load
 	staff   int          // settlers employed here
@@ -139,8 +140,10 @@ type World struct {
 	// Water and seasons
 	Water      []float32 // depth per tile of the water region
 	Drought    bool
-	SeasonLeft float64 // seconds left in the current season
-	Cycle      int     // completed wet+drought cycles
+	Polluted   bool      // muddy-water season
+	Cont       []float32 // contamination of the water per tile (0..1)
+	SeasonLeft float64   // seconds left in the current season
+	Cycle      int       // completed wet+drought cycles
 
 	ResearchQueue []string // techs to research; the first is active
 	ResearchNeed  []Stack  // materials still to deliver for the active one
@@ -169,6 +172,7 @@ type World struct {
 	springs    []int
 	sinks      []int
 	flux       []float32 // 4 outflows per water cell
+	massBuf    []float32
 	wallsDirty bool
 	vegChunks  map[Pos]*[vegChunkTiles]Veg
 	order      []int32
@@ -396,7 +400,7 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 	if k == KFarm && w.OreAt(p) != ItemNone {
 		return ErrOnOre
 	}
-	if k != KPump && waterBlock(k) == 0 {
+	if k != KPump && k != KPurifier && waterBlock(k) == 0 {
 		for y := 0; y < s; y++ {
 			for x := 0; x < s; x++ {
 				if w.WaterAt(p.Add(x, y)) > BuildMaxWet {
@@ -405,7 +409,7 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 			}
 		}
 	}
-	if k == KPump && !w.nearWater(p, s) {
+	if (k == KPump || k == KPurifier) && !w.nearWater(p, s) {
 		return ErrNoWater
 	}
 	if k == KFarm && !w.MoistAt(p) {
@@ -629,3 +633,11 @@ var sawmillRecipe = func() int {
 	}
 	return -1
 }()
+
+// SetGate opens or closes a floodgate.
+func (w *World) SetGate(id int32, open bool) {
+	if b := w.Buildings[id]; b != nil && b.Kind == KGate {
+		b.GateOpen = open
+		w.wallsDirty = true
+	}
+}
