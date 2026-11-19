@@ -55,20 +55,39 @@ surfaces with **platforms**, put buildings on top of them, connect height differ
    it faces when that tile is up to **2** levels higher (in both directions). Everywhere else the
    existing ±1 rule applies, so natural terrain play is unchanged and 2-level cliffs/platform
    stacks need stairs.
+   **One transition rule everywhere:** a single `World.CanStep(from, to int, goal int32) bool`
+   that is the *complete* current A* edge rule plus stairs, for neighbouring tiles only:
+   - orthogonal: |ΔWalkHeight| ≤ 1, or ≤ 2 when one tile is a finished stair facing the other;
+   - diagonal (unchanged from today): both heights equal **and** both side tiles passable for
+     `goal` with the same WalkHeight (no corner cutting); stairs never enable diagonal moves;
+   - the destination must be passable for `goal` (or be the goal).
+   It is used by A* in `FindPath`,
+   by per-step movement along cached paths (decision 10), and by idle wandering in
+   `settlers.go` (which today checks `absi(WalkHeight diff) <= 1`; it calls `CanStep(cur, next, 0)`
+   whenever its next position lies in another tile). No other movement code may
+   compare heights directly.
 8. **Bridges.** Support-layer, size 1, allowed on any tile without a top owner or support
    (including water and level 0; also dry gaps). Deck height is chosen at placement:
    `target = max WalkHeight over orthogonal neighbours that are not water-blocked`, then
    `Levels = clamp(target − Height, 1, 3)`. Refuse if no valid neighbour exists («Міст має
    спиратися на берег або інший міст»). A finished bridge ignores water for `passable` and does
    not affect water flow. Nothing can be built on a bridge (except nothing — top layer stays empty).
-   Bridges are field-worker blocked tiles (no planting/chopping on them).
+   **Field-work occupancy:** add `World.occupied(i) = owner[i] != 0 || support[i] != 0` and use
+   it in *both* field-target selection (`work.go` `fieldTarget`, today `w.owner[i] != 0`) and the
+   final work action (`work.go` forester planting check, today `w.owner[i] == 0`), so no tree is
+   planted or targeted on platform or bridge tiles. Test: a forester next to a bridge/platform
+   never targets those tiles.
 9. **Demolition.** Removing a support with a top building on it is refused («Спочатку знесіть
    те, що стоїть зверху»). Removing a platform refunds only the delivered materials of the
    current site plus `Levels-1` full platform costs if it was upgraded (simple: refund
    `cost × finished levels` + delivered part of an in-progress level).
-10. **Settler safety.** When a support finishes or is removed, settlers standing on that tile
-   just follow the new `WalkHeight` (Z already eases toward it); their cached paths are
-   invalidated by bumping a world `pathEpoch` that `walk` compares against (re-plan on change).
+10. **Settler safety / path invalidation.** A world `pathEpoch` (not saved) is bumped on **every
+   change that alters passability or legal transitions**: any building site finishing (incl.
+   stairs, platforms, bridges, dams and ordinary buildings, which become blocking), any building
+   or site being removed, and any platform upgrade starting. `walk` stores the epoch with a cached
+   path and re-plans when it differs. In addition, the per-step movement re-checks the transition
+   to the next path tile with `CanStep` and re-plans if
+   it is no longer legal. Settlers standing on a changed tile follow the new `WalkHeight`.
 11. **Rendering.**
     - Platform: wooden posts at corners from ground to surface, plank deck as a thin box on top
       with edge trim; under construction: posts + partial deck proportional to progress.
@@ -77,8 +96,14 @@ surfaces with **platforms**, put buildings on top of them, connect height differ
     - Buildings, ghost, settlers, props and hover/pick use `Surface` instead of `Height`.
       `Pick` tests each tile's top at `Surface` (bridges/platforms are clickable via their tile;
       clicking selects the top building first, otherwise the support).
-12. **UI.** New category tab «Будова» with the three items; the tool hint shows the auto-chosen
-    stair direction/bridge height via `CheckPlace` errors only (no rotate key in this milestone).
+12. **Placement preview.** Add `World.PlanPlacement(k, x, y) (Placement, error)` returning
+    `Placement{Dir, Levels int; Upgrade bool; Base int}` (the computed stair direction, the
+    bridge/platform target levels, whether it upgrades an existing platform, and the surface level
+    the building will stand on). `CheckPlace` returns only its error and `Place` applies its result,
+    so preview and placement cannot diverge. The ghost is drawn with the computed `Dir`/`Levels`
+    at `Base`, and the tool hint shows a success line: stairs «Сходи: вгору на N рівн. (→ напрям)»,
+    bridge «Міст на висоті N», platform «Помост: рівень N/3» (or «Надбудова: рівень N/3»).
+    **UI.** New category tab «Будова» with the three items (no rotate key in this milestone).
     Selection panel shows «Рівнів: N/3» for platforms and «Висота: N» for bridges.
 13. **Save.** `SaveVersion` stays 1 (fields only added; gob ignores missing). `support` cache is
     rebuilt by `initCaches` by marking support kinds into `support`, others into `owner`.
@@ -94,7 +119,9 @@ B. Platform upgrade 1→2→3 works on an empty platform; a 4th placement and an
    house on top are refused with errors; Farm/Pump/Dam refused on a platform.
 C. With a platform stack of 2 levels next to ground, `FindPath` from the ground to the platform
    top fails without stairs and succeeds with finished stairs facing it. Existing
-   `TestPathAroundTerrain` still passes.
+   `TestPathAroundTerrain` still passes, and a new `TestCanStepMatchesOldRule` checks that on the
+   generated terrain without structures `CanStep` equals the old A* edge rule for every tile and
+   all 8 neighbours.
 D. A row of bridges across the river (auto height) lets `FindPath` cross from bank to bank where
    it failed before; water simulation stays within 1% total-volume of the no-bridge run after
    N steps (bridges don't block water).
@@ -109,7 +136,9 @@ H. Visual: a screenshot of a demo town with a 2-level platform + house on top, s
 ## Verification
 - `cd potik3d && gofmt -l . && go vet ./... && go test ./...` → no gofmt output, vet clean, all
   tests pass (new tests: `TestPlatformStack`, `TestStairsPath`, `TestBridgeCross`,
-  `TestDemolishSupport`, extended `TestSaveRoundTrip`).
+  `TestDemolishSupport`, `TestFieldWorkSkipsSupports`, `TestStairRemovalReplans` (a settler
+  walking a route over a stair re-plans and never crosses a 2-level gap after the stair is removed), `TestPlanPlacement` (preview equals the
+  placed building's `Dir`/`Levels`), extended `TestSaveRoundTrip`).
 - `./build.sh` → `dist/potik3d.exe` builds for Windows.
 - Visual: `xvfb-run ... ./p3d -debug-shot vert.png -debug-demo 300 -debug-vertical` (new flag
   that adds the demo structures via `world.BuildVerticalDemo` and completes their sites) and
