@@ -211,3 +211,18 @@ func TestBigAssemblerIsFaster(t *testing.T) {
 		t.Fatalf("a 2s gear should take 2/3s, out=%d", a.OutN)
 	}
 }
+
+func TestWaveSchedule(t *testing.T) {
+	w := NewWorld(1)
+	if w.NextWave != 20*60 {
+		t.Fatalf("first wave in %.0fs, want 20 min", w.NextWave)
+	}
+	if WaveInterval(1) < 7*60 || WaveInterval(30) != 180 {
+		t.Fatalf("intervals %.0f .. %.0f", WaveInterval(1), WaveInterval(30))
+	}
+	for n := 1; n < 20; n++ {
+		if WaveInterval(n+1) > WaveInterval(n) {
+			t.Fatal("intervals should not grow")
+		}
+	}
+}

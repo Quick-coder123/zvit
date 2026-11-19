@@ -52,7 +52,7 @@ type Shot struct {
 }
 
 const (
-	FirstWaveDelay = 600.0 // seconds before the first wave
+	FirstWaveDelay = 1200.0 // seconds before the first wave (20 min)
 	AmmoShots      = 10    // shots per Ammo item
 	CoalFuel       = 40    // flamer fuel units per Coal
 	TurretAmmoCap  = 200
@@ -78,8 +78,9 @@ func (w *World) rollWaveAngle() float64 {
 	return unit(hash3(w.Seed, w.Wave, 0, 991)) * 2 * math.Pi
 }
 
-// WaveInterval is the pause after wave n has spawned.
-func WaveInterval(n int) float64 { return math.Max(150, 240-6*float64(n)) }
+// WaveInterval is the pause after wave n has spawned: about 7.5 min early
+// on, shrinking by 25 s per wave down to 3 min.
+func WaveInterval(n int) float64 { return math.Max(180, 480-25*float64(n)) }
 
 // WaveBudget is the strength of wave n (1-based) in crawler-equivalents.
 func WaveBudget(n int) float64 { return 3 + 2.2*float64(n) + 0.12*float64(n*n) }

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 5
+const SaveVersion = 6
 
 type saveFile struct {
 	Version   int
@@ -149,6 +149,13 @@ func Decode(in io.Reader) (*World, error) {
 		if w.Researched["chest"] || w.Researched["assembler"] {
 			w.Researched["station"] = true
 		}
+	}
+	if sf.Version < 6 && !w.Peaceful {
+		// waves used to come much sooner; give existing towns the new breathing room
+		if w.Wave == 0 {
+			w.NextWave = max(w.NextWave, FirstWaveDelay-float64(w.Tick)/TPS)
+		}
+		w.NextWave = max(w.NextWave, WaveInterval(w.Wave)/2)
 	}
 	if sf.Version < 5 {
 		w.Free[KLab]++ // research now happens at a research station
