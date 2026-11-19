@@ -19,6 +19,8 @@ const (
 	Wire
 	Ammo
 	Food
+	Wood
+	Planks
 	ItemCount
 )
 
@@ -34,6 +36,8 @@ const (
 	ShapeCoil               // small coil
 	ShapeAmmo               // cartridge
 	ShapeFood               // grain sack
+	ShapeLog                // log
+	ShapeBoard              // planks
 )
 
 type ItemDef struct {
@@ -58,6 +62,8 @@ var Items = [ItemCount]ItemDef{
 	Wire:        {"Дріт", 0xD9894F, ShapeCoil},
 	Ammo:        {"Набої", 0xC9A227, ShapeAmmo},
 	Food:        {"Їжа", 0xC9B458, ShapeFood},
+	Wood:        {"Деревина", 0x9C6B45, ShapeLog},
+	Planks:      {"Дошки", 0xD9B27C, ShapeBoard},
 }
 
 // Stack is an amount of one item.

@@ -25,7 +25,7 @@ func (w *World) Update(active ActiveFunc) {
 		switch b.Kind.Base() {
 		case KMiner:
 			w.stepMiner(b)
-		case KFurnace, KAssembler:
+		case KFurnace, KAssembler, KSawmill:
 			w.stepCrafter(b)
 		case KFarm:
 			w.stepFarm(b)

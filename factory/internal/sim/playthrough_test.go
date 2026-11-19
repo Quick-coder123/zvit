@@ -39,6 +39,7 @@ func freeSpot(w *World, near Pos) Pos {
 // checks the economy holds up through the first wave.
 func TestEarlyGamePlaythrough(t *testing.T) {
 	w := NewWorld(42)
+	w.Peaceful = false
 	try := func(k Kind, p Pos) {
 		if _, err := w.Place(k, p, East, 0); err != nil {
 			t.Logf("%5.0fs place %s: %v", float64(w.Tick)/TPS, Builds[k].Name, err)
@@ -48,6 +49,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 	try(KFarm, freeSpot(w, Pos{-3, 3}))
 	try(KHouse, freeSpot(w, Pos{2, 3}))
 	try(KLab, freeSpot(w, Pos{-3, -4}))
+	try(KLumber, freeSpot(w, Pos{5, 7}))
 	step := 0
 	for sec := 0; sec < 15*60; sec++ {
 		run(w, 1)
@@ -55,8 +57,10 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 		case step == 0 && sec >= 40:
 			try(KMiner, nearestOre(w, Stone))
 			step++
-		case step == 1 && w.TotalStock(Stone) >= 8:
+		case step == 1 && w.TotalStock(Wood) >= 10:
 			try(KHouse, freeSpot(w, Pos{4, 3}))
+			try(KForester, freeSpot(w, Pos{9, 6}))
+			try(KGatherer, freeSpot(w, Pos{-6, 7}))
 			step++
 		case step == 2:
 			w.Research("furnace")
@@ -69,7 +73,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 			try(KMiner, nearestOre(w, IronOre))
 			try(KFarm, freeSpot(w, Pos{-5, 4}))
 			step++
-		case step == 5 && w.TotalStock(Stone) >= 20:
+		case step == 5 && w.TotalStock(Wood) >= 14:
 			try(KHouse, freeSpot(w, Pos{0, 5}))
 			try(KHouse, freeSpot(w, Pos{2, 6}))
 			step++
@@ -90,6 +94,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 			used, total := w.StorageTotals()
 			d, wk := w.ResearchProgress()
 			t.Logf("   research queue %v delivered %.0f%% work %.0f%%", w.ResearchQueue, d*100, wk*100)
+			t.Logf("   wood %d", w.TotalStock(Wood))
 			t.Logf("%2d min: pop %2d/%2d free %d work %d carriers %d starving %d storage %3d/%3d food %3d ore %3d stone %3d plates %3d wave %d deaths %d step %d",
 				(sec+1)/60, w.Population(), w.Housing(), free, work, car, starving, used, total, w.TotalStock(Food),
 				w.TotalStock(IronOre), w.TotalStock(Stone), w.TotalStock(IronPlate), w.Wave, w.Deaths, step)

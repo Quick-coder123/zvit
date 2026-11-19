@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 6
+const SaveVersion = 7
 
 type saveFile struct {
 	Version   int
@@ -43,6 +43,17 @@ type saveFile struct {
 	ResearchQueue []string
 	ResearchNeed  []Stack
 	ResearchWork  float32
+
+	// v7
+	Planted []PosTick
+	Cleared []Pos
+	Picked  []PosTick
+}
+
+// PosTick pairs a tile with a tick (vegetation changes in saves).
+type PosTick struct {
+	Pos  Pos
+	Tick uint64
 }
 
 // Encode writes the world in the save format.
@@ -53,6 +64,17 @@ func (w *World) Encode(out io.Writer) error {
 		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills,
 		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths,
 		ResearchQueue: w.ResearchQueue, ResearchNeed: w.ResearchNeed, ResearchWork: w.ResearchWork}
+	for p, t := range w.Planted {
+		sf.Planted = append(sf.Planted, PosTick{p, t})
+	}
+	for p := range w.Cleared {
+		sf.Cleared = append(sf.Cleared, p)
+	}
+	for p, t := range w.Picked {
+		if w.Tick-t < BushRegrow*TPS {
+			sf.Picked = append(sf.Picked, PosTick{p, t})
+		}
+	}
 	for _, id := range w.Order() {
 		sf.Buildings = append(sf.Buildings, w.Buildings[id])
 	}
@@ -82,6 +104,16 @@ func Decode(in io.Reader) (*World, error) {
 		ResearchQueue: sf.ResearchQueue, ResearchNeed: sf.ResearchNeed, ResearchWork: sf.ResearchWork}
 	copy(w.Stock[:], sf.Stock)
 	copy(w.Free[:], sf.Free)
+	w.Planted, w.Cleared, w.Picked = map[Pos]uint64{}, map[Pos]bool{}, map[Pos]uint64{}
+	for _, pt := range sf.Planted {
+		w.Planted[pt.Pos] = pt.Tick
+	}
+	for _, p := range sf.Cleared {
+		w.Cleared[p] = true
+	}
+	for _, pt := range sf.Picked {
+		w.Picked[pt.Pos] = pt.Tick
+	}
 	if w.Researched == nil {
 		w.Researched = map[string]bool{}
 	}
@@ -159,6 +191,10 @@ func Decode(in io.Reader) (*World, error) {
 	}
 	if sf.Version < 5 {
 		w.Free[KLab]++ // research now happens at a research station
+	}
+	if sf.Version < 7 {
+		w.Free[KLumber]++ // wood became the main building material
+		w.Stock[Wood] += 40
 	}
 	w.initCaches()
 	if sf.Version < 4 {

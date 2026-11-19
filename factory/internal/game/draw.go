@@ -52,6 +52,10 @@ var (
 		sim.KFarm:      rgb(0x8DB360),
 		sim.KStation:   rgb(0xD4A373),
 		sim.KLab:       rgb(0x8E7CC3),
+		sim.KLumber:    rgb(0x9C6B45),
+		sim.KForester:  rgb(0x6FA06A),
+		sim.KGatherer:  rgb(0xC0504D),
+		sim.KSawmill:   rgb(0xB08A5A),
 	}
 )
 
@@ -214,6 +218,17 @@ func drawItem(dst *ebiten.Image, it sim.Item, cx, cy, s float32) {
 		line(dst, cx-h*0.35, cy-h*0.45, cx+h*0.35, cy-h*0.45, max32(1, s*0.08), dark)
 		line(dst, cx, cy-h*0.45, cx-h*0.2, cy-h*0.85, max32(1, s*0.06), rgb(0x8DB360))
 		line(dst, cx, cy-h*0.45, cx+h*0.25, cy-h*0.8, max32(1, s*0.06), rgb(0x8DB360))
+	case sim.ShapeLog:
+		fillRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, c)
+		strokeRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, max32(1, s*0.06), dark)
+		fillCircle(dst, cx+h*0.62, cy, h*0.3, rgb(0xE3C79B))
+		strokeCircle(dst, cx+h*0.62, cy, h*0.15, max32(1, s*0.04), dark)
+	case sim.ShapeBoard:
+		for k := -1; k <= 1; k++ {
+			y := cy + float32(k)*h*0.42
+			fillRoundRect(dst, cx-h*0.85, y-h*0.17, h*1.7, h*0.34, h*0.08, c)
+			strokeRoundRect(dst, cx-h*0.85, y-h*0.17, h*1.7, h*0.34, h*0.08, max32(1, s*0.04), dark)
+		}
 	case sim.ShapeCoil:
 		fillCircle(dst, cx, cy, h*0.8, c)
 		strokeCircle(dst, cx, cy, h*0.55, max32(1, s*0.08), dark)

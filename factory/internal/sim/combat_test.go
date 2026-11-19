@@ -70,6 +70,7 @@ func TestFreeTokenRefund(t *testing.T) {
 
 func TestWaveScheduleAndCoreDefends(t *testing.T) {
 	w := NewWorld(11)
+	w.Peaceful = false
 	w.NextWave = DT / 2
 	w.Update(nil)
 	if w.Wave != 1 || len(w.Enemies) == 0 {
@@ -214,6 +215,9 @@ func TestBigAssemblerIsFaster(t *testing.T) {
 
 func TestWaveSchedule(t *testing.T) {
 	w := NewWorld(1)
+	if !w.Peaceful {
+		t.Fatal("new worlds start peaceful")
+	}
 	if w.NextWave != 20*60 {
 		t.Fatalf("first wave in %.0fs, want 20 min", w.NextWave)
 	}

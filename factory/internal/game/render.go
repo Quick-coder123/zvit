@@ -76,6 +76,7 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 		}
 	}
 
+	g.drawVegetation(dst, tx0, ty0, tx1, ty1)
 	g.drawRuins(dst)
 
 	view := func(b *sim.Building) bool {
@@ -235,6 +236,39 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 				fillCircle(dst, cx+float32(math.Sin(ph*6+float64(k)))*fh*0.12, cy-fh*float32(0.1+ph*0.6), max32(1, s*0.035), fade(rgba(0x8E7CC3, uint8(220*(1-ph)))))
 			}
 		}
+	case sim.KLumber:
+		// axe
+		line(dst, cx-bw*0.2, cy+bw*0.25, cx+bw*0.15, cy-bw*0.2, max32(1.5, s*0.08), fade(rgb(0x6B4F3A)))
+		path.MoveTo(cx+bw*0.05, cy-bw*0.3)
+		path.LineTo(cx+bw*0.32, cy-bw*0.22)
+		path.LineTo(cx+bw*0.22, cy+bw*0.02)
+		path.Close()
+		fillPath(dst, fade(rgb(0x8C99A6)))
+		drawItem(dst, sim.Wood, cx-bw*0.18, cy+bw*0.3, s*0.26)
+	case sim.KForester:
+		line(dst, cx, cy+bw*0.3, cx, cy-bw*0.05, max32(1.5, s*0.07), fade(rgb(0x6B4F3A)))
+		fillCircle(dst, cx-bw*0.12, cy-bw*0.1, bw*0.14, fade(acc))
+		fillCircle(dst, cx+bw*0.12, cy-bw*0.16, bw*0.14, fade(mix(acc, colBody, 0.25)))
+		fillCircle(dst, cx, cy-bw*0.28, bw*0.14, fade(acc))
+	case sim.KGatherer:
+		fillRoundRect(dst, cx-bw*0.3, cy-bw*0.05, bw*0.6, bw*0.32, s*0.08, fade(rgb(0xC8A97E)))
+		for k := 0; k < 4; k++ {
+			fillCircle(dst, cx-bw*0.18+float32(k)*bw*0.12, cy-bw*0.08, bw*0.07, fade(acc))
+		}
+		line(dst, cx-bw*0.28, cy-bw*0.05, cx, cy-bw*0.35, max32(1, s*0.05), fade(rgb(0x8C6B4A)))
+		line(dst, cx, cy-bw*0.35, cx+bw*0.28, cy-bw*0.05, max32(1, s*0.05), fade(rgb(0x8C6B4A)))
+	case sim.KSawmill:
+		rot := 0.0
+		if b.Working {
+			rot = t * 4
+		}
+		r := bw * 0.26
+		strokeCircle(dst, cx, cy, r, max32(1, s*0.06), fade(mix(acc, colInk, 0.3)))
+		for k := 0; k < 8; k++ {
+			a := rot + float64(k)*math.Pi/4
+			triangle(dst, cx+float32(math.Cos(a))*r, cy+float32(math.Sin(a))*r, float32(a+math.Pi/2), s*0.12, fade(mix(acc, colInk, 0.3)))
+		}
+		fillCircle(dst, cx, cy, bw*0.07, fade(colInk))
 	case sim.KStation:
 		// a little cart
 		fillRoundRect(dst, cx-bw*0.3, cy-bw*0.2, bw*0.6, bw*0.32, s*0.06, fade(acc))
@@ -287,7 +321,7 @@ func (g *Game) drawStatus(dst *ebiten.Image, b *sim.Building, x, y, w float32) {
 		fillCircle(dst, cx, cy, r, rgba(0x2E3440, 0xDD))
 		fillRect(dst, cx-r*0.4, cy-r*0.45, r*0.28, r*0.9, colBG)
 		fillRect(dst, cx+r*0.12, cy-r*0.45, r*0.28, r*0.9, colBG)
-	case sim.Builds[b.Kind].Workers > 0 && b.Kind != sim.KStation && b.Inside() < sim.Builds[b.Kind].Workers:
+	case sim.Builds[b.Kind].Workers > 0 && b.Kind != sim.KStation && !(b.Kind.IsFieldKind() && b.Staff() >= sim.Builds[b.Kind].Workers) && b.Inside() < sim.Builds[b.Kind].Workers:
 		fillCircle(dst, cx, cy, r, rgba(0xE07A5F, 0xE6))
 		personGlyph(dst, cx, cy, r*0.9, colBody)
 	}
@@ -375,26 +409,83 @@ func (g *Game) isCarrier(st *sim.Settler) bool {
 	return b != nil && b.Kind == sim.KStation
 }
 
-// drawStationRange shows the reach of the selected or hovered station.
-func (g *Game) drawStationRange(dst *ebiten.Image) {
-	var b *sim.Building
-	if sel := g.w.Buildings[g.selected]; sel != nil && sel.Kind == sim.KStation {
-		b = sel
-	} else if h := g.w.At(g.hover); h != nil && h.Kind == sim.KStation {
-		b = h
-	}
-	s := float32(g.cam.Scale)
-	var cx, cy float32
+// workRadius is the reach of stations and field huts (0 for others).
+func workRadius(k sim.Kind) float64 {
 	switch {
-	case b != nil:
-		cx, cy = g.cam.ToScreen(float64(b.Pos.X)+0.5, float64(b.Pos.Y)+0.5)
-	case g.tool == sim.KStation && !g.overUI:
-		p := g.footprint(sim.KStation)
-		cx, cy = g.cam.ToScreen(float64(p.X)+0.5, float64(p.Y)+0.5)
-	default:
+	case k == sim.KStation:
+		return sim.StationRadius
+	case k.IsFieldKind():
+		return sim.FieldRadius + 0.5
+	}
+	return 0
+}
+
+// drawStationRange shows the reach of the selected or hovered station or
+// field hut, or of the one about to be placed.
+func (g *Game) drawStationRange(dst *ebiten.Image) {
+	var k sim.Kind
+	var x, y float64
+	if sel := g.w.Buildings[g.selected]; sel != nil && workRadius(sel.Kind) > 0 {
+		k, x, y = sel.Kind, float64(sel.Pos.X)+0.5, float64(sel.Pos.Y)+0.5
+	} else if h := g.w.At(g.hover); h != nil && workRadius(h.Kind) > 0 && g.tool == sim.KNone {
+		k, x, y = h.Kind, float64(h.Pos.X)+0.5, float64(h.Pos.Y)+0.5
+	} else if workRadius(g.tool) > 0 && !g.overUI {
+		p := g.footprint(g.tool)
+		k, x, y = g.tool, float64(p.X)+0.5, float64(p.Y)+0.5
+	} else {
 		return
 	}
-	r := s * sim.StationRadius
-	fillCircle(dst, cx, cy, r, rgba(0xD4A373, 0x18))
-	strokeCircle(dst, cx, cy, r, max32(1.5, s*0.05), rgba(0xD4A373, 0xAA))
+	s := float32(g.cam.Scale)
+	cx, cy := g.cam.ToScreen(x, y)
+	c := accentOf(k)
+	r := s * float32(workRadius(k))
+	fillCircle(dst, cx, cy, r, color.RGBA{c.R / 10, c.G / 10, c.B / 10, 0x18})
+	strokeCircle(dst, cx, cy, r, max32(1.5, s*0.05), color.RGBA{uint8(int(c.R) * 0xAA / 255), uint8(int(c.G) * 0xAA / 255), uint8(int(c.B) * 0xAA / 255), 0xAA})
+}
+
+// drawVegetation draws trees and berry bushes.
+func (g *Game) drawVegetation(dst *ebiten.Image, tx0, ty0, tx1, ty1 int) {
+	s := float32(g.cam.Scale)
+	t := float64(g.w.Tick) / sim.TPS
+	for y := ty0; y <= ty1; y++ {
+		for x := tx0; x <= tx1; x++ {
+			p := sim.Pos{X: x, Y: y}
+			v, grow := g.w.VegAt(p)
+			if v == sim.VegNone || g.w.At(p) != nil {
+				continue
+			}
+			sx, sy := g.cam.ToScreen(float64(x)+0.5, float64(y)+0.5)
+			h := uint32(x*73856093) ^ uint32(y*19349663)
+			jx := (float32(h&0xFF)/255 - 0.5) * s * 0.2
+			jy := (float32(h>>8&0xFF)/255 - 0.5) * s * 0.2
+			sx, sy = sx+jx, sy+jy
+			switch v {
+			case sim.VegTree:
+				size := float32(0.25 + 0.75*grow)
+				r := s * 0.42 * size
+				sway := float32(math.Sin(t*0.8+float64(h%100))) * s * 0.015
+				fillCircle(dst, sx+s*0.05, sy+s*0.1, r, rgba(0x2E3440, 0x22))
+				if s >= 10 {
+					fillRect(dst, sx-s*0.05, sy, s*0.1, s*0.25*size, rgb(0x7A5536))
+				}
+				dark, light := rgb(0x4E8A55), rgb(0x6FA06A)
+				if h%3 == 0 {
+					dark, light = rgb(0x3F7A4A), rgb(0x5E9A62)
+				}
+				fillCircle(dst, sx+sway, sy-s*0.08*size, r, dark)
+				fillCircle(dst, sx-r*0.25+sway, sy-s*0.08*size-r*0.25, r*0.62, light)
+			case sim.VegBush:
+				r := s * 0.3
+				fillCircle(dst, sx+s*0.04, sy+s*0.07, r, rgba(0x2E3440, 0x20))
+				fillCircle(dst, sx, sy, r, rgb(0x5E9A62))
+				fillCircle(dst, sx-r*0.3, sy-r*0.3, r*0.55, rgb(0x76B06F))
+				if grow >= 1 && s >= 10 {
+					for k := 0; k < 4; k++ {
+						a := float64(k)*1.7 + float64(h%7)
+						fillCircle(dst, sx+float32(math.Cos(a))*r*0.55, sy+float32(math.Sin(a))*r*0.55, max32(1.2, s*0.05), rgb(0xC0504D))
+					}
+				}
+			}
+		}
+	}
 }

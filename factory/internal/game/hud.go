@@ -14,17 +14,19 @@ import (
 // toolbar groups; the hotkey for each slot is listed in toolKeys.
 var toolGroups = [][]sim.Kind{
 	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation, sim.KLab},
+	{sim.KLumber, sim.KForester, sim.KGatherer, sim.KSawmill},
 	{sim.KMiner, sim.KFurnace, sim.KAssembler},
 	{sim.KWall, sim.KFlamer, sim.KTurret},
 }
 
 var toolKeys = []ebiten.Key{
 	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
-	ebiten.Key6, ebiten.Key7, ebiten.Key8,
+	ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
+	ebiten.Key0, ebiten.KeyF, ebiten.KeyG,
 	ebiten.KeyZ, ebiten.KeyX, ebiten.KeyC,
 }
 
-var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "Z", "X", "C"}
+var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F", "G", "Z", "X", "C"}
 
 func toolList() []sim.Kind {
 	var out []sim.Kind
@@ -41,7 +43,7 @@ func lockGlyph(dst *ebiten.Image, cx, cy, s float32, c color.RGBA) {
 
 func (g *Game) drawToolbar(dst *ebiten.Image) {
 	u := g.ui
-	slot, gap, groupGap := 58*u, 6*u, 18*u
+	slot, gap, groupGap := 52*u, 5*u, 14*u
 	n := 0
 	for _, gr := range toolGroups {
 		n += len(gr)
@@ -84,9 +86,9 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 				drawText(dst, label, sr.x+sr.w-5*u, sr.y+2*u, 10*u, true, lc, alignRight)
 			}
 			if unlocked {
-				g.iconBuilding(dst, shown, sr.x+11*u, sr.y+10*u, slot-22*u, sim.East)
+				g.iconBuilding(dst, shown, sr.x+9*u, sr.y+9*u, slot-18*u, sim.East)
 			} else {
-				g.iconBuilding(dst, k, sr.x+11*u, sr.y+10*u, slot-22*u, sim.East)
+				g.iconBuilding(dst, k, sr.x+9*u, sr.y+9*u, slot-18*u, sim.East)
 				fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), rgba(0xF7F4EE, 0xC8))
 				lockGlyph(dst, float32(sr.x+sr.w/2), float32(sr.y+sr.h/2+2*u), float32(18*u), rgb(0x9AA0AC))
 			}

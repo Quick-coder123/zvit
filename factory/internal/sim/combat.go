@@ -53,8 +53,8 @@ type Shot struct {
 
 const (
 	FirstWaveDelay = 1200.0 // seconds before the first wave (20 min)
-	AmmoShots      = 10    // shots per Ammo item
-	CoalFuel       = 40    // flamer fuel units per Coal
+	AmmoShots      = 10     // shots per Ammo item
+	CoalFuel       = 40     // flamer fuel units per Coal
 	TurretAmmoCap  = 200
 	FlamerFuelCap  = 200
 	aggroRadius    = 7

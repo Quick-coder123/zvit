@@ -126,6 +126,11 @@ type World struct {
 	Free       [KindCount]int  // starter buildings that cost nothing
 	Researched map[string]bool // finished research
 
+	// Vegetation changes on top of the generated map.
+	Planted map[Pos]uint64 // tick a sapling was planted
+	Cleared map[Pos]bool   // natural trees/bushes removed
+	Picked  map[Pos]uint64 // tick a bush was last picked
+
 	ResearchQueue []string // techs to research; the first is active
 	ResearchNeed  []Stack  // materials still to deliver for the active one
 	ResearchWork  float32  // 0..1 once materials are in
@@ -144,6 +149,7 @@ type World struct {
 	grid       map[Pos]int32
 	chunks     map[Pos]*[chunkSize * chunkSize]Item
 	fullWarned uint64
+	vegChunks  map[Pos]*[vegChunkTiles]Veg
 	order      []int32
 	dirty      bool
 }
@@ -158,6 +164,8 @@ func NewWorld(seed int64) *World {
 	w.Free[KFarm] = 1
 	w.Free[KHouse] = 1
 	w.Free[KLab] = 1
+	w.Free[KLumber] = 1
+	w.Stock[Wood] = 30
 	w.Stock[Food] = 40
 	w.Stock[Stone] = 30
 	w.Stock[IronOre] = 20
@@ -168,12 +176,23 @@ func NewWorld(seed int64) *World {
 	}
 	w.NextWave = FirstWaveDelay
 	w.WaveAngle = w.rollWaveAngle()
+	w.Peaceful = true // enemies are optional; switch them on in the menu
 	return w
 }
 
 func (w *World) initCaches() {
 	w.grid = map[Pos]int32{}
 	w.chunks = map[Pos]*[chunkSize * chunkSize]Item{}
+	w.vegChunks = map[Pos]*[vegChunkTiles]Veg{}
+	if w.Planted == nil {
+		w.Planted = map[Pos]uint64{}
+	}
+	if w.Cleared == nil {
+		w.Cleared = map[Pos]bool{}
+	}
+	if w.Picked == nil {
+		w.Picked = map[Pos]uint64{}
+	}
 	w.dirty = true
 	for _, b := range w.Buildings {
 		w.mark(b, b.ID)
@@ -399,6 +418,14 @@ func (w *World) PlaceSpec(sp Spec, owner uint8) (*Building, error) {
 		b.AutoRecipe = true
 	}
 	w.add(b)
+	if k == KSawmill {
+		w.SetRecipe(b.ID, sawmillRecipe)
+	}
+	for y := 0; y < b.Size(); y++ {
+		for x := 0; x < b.Size(); x++ {
+			w.clearVeg(p.Add(x, y))
+		}
+	}
 	if sp.Recipe >= 0 && sp.Recipe < len(Recipes) && Recipes[sp.Recipe].Machine == k.Base() && w.RecipeUnlocked(sp.Recipe) {
 		w.SetRecipe(b.ID, sp.Recipe)
 	}
@@ -534,3 +561,13 @@ func MinerRate(b *Building) float64 {
 	}
 	return SpeedOf(b.Kind) * float64(b.MinerTiles) / float64(n) / MinerTime
 }
+
+// sawmillRecipe is the only recipe of a sawmill (wood -> planks).
+var sawmillRecipe = func() int {
+	for i, r := range Recipes {
+		if r.Machine == KSawmill {
+			return i
+		}
+	}
+	return -1
+}()

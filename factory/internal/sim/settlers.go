@@ -30,6 +30,12 @@ type Settler struct {
 	Phase uint8 // haul: 0 = going to pick up, 1 = going to drop off
 	Carry Stack
 
+	// Field work for lumberjacks, foresters and gatherers.
+	FieldPhase uint8 // 0 inside, 1 walking out, 2 working, 3 walking back
+	FieldX     int
+	FieldY     int
+	FieldT     float32
+
 	MealIn   float32 // seconds until the next meal
 	Starving float32 // seconds spent without food
 	Seed     float32 // per-settler variation for idle wandering
@@ -212,10 +218,16 @@ func (w *World) stepSettler(s *Settler) {
 		return
 	}
 
+	if s.Job == 0 && s.FieldPhase != 0 {
+		s.FieldPhase = 0 // lost the job while outdoors
+	}
 	if s.Job != 0 {
 		jb := w.Buildings[s.Job]
 		if jb == nil {
-			s.Job, s.Inside = 0, false
+			s.Job, s.Inside, s.FieldPhase = 0, false, 0
+			return
+		}
+		if jb.Kind.IsFieldKind() && w.stepFieldWorker(s, jb) {
 			return
 		}
 		if s.Inside {
@@ -602,8 +614,23 @@ func (w *World) allocate() {
 	}
 	sort.SliceStable(jobs, func(i, j int) bool { return jobPriority(w, jobs[i]) < jobPriority(w, jobs[j]) })
 	idle := freeIdle()
+	// keep a few free hands for building and hauling so the town never
+	// locks up with everyone employed
+	free, carriersN := 0, 0
+	for _, s := range w.Settlers {
+		if s.Job == 0 {
+			free++
+		} else if w.station(s) != nil {
+			carriersN++
+		}
+	}
+	keepFree := len(w.Settlers) / 6
+	if len(w.Settlers) >= 3 {
+		keepFree = max(keepFree, 1)
+	}
+	keepFree = max(0, keepFree-carriersN)
 	for _, b := range jobs {
-		for b.staff < Builds[b.Kind].Workers {
+		for b.staff < Builds[b.Kind].Workers && free > keepFree {
 			var s *Settler
 			idle, s = take(idle, b)
 			if s == nil {
@@ -611,6 +638,7 @@ func (w *World) allocate() {
 			}
 			s.Job, s.Inside = b.ID, false
 			b.staff++
+			free--
 		}
 	}
 
@@ -820,7 +848,7 @@ func (w *World) Residents(id int32) int {
 func (w *World) FoodAvailable() int {
 	n := w.TotalStock(Food)
 	for _, b := range w.Buildings {
-		if b.Kind == KFarm && b.OutItem == Food {
+		if b.OutItem == Food {
 			n += b.OutN
 		}
 	}
@@ -828,13 +856,13 @@ func (w *World) FoodAvailable() int {
 }
 
 // eat takes one food from storage or, when storage has none, straight from
-// a farm's store, so full warehouses never starve the town.
+// a farm's or gatherer's store, so full warehouses never starve the town.
 func (w *World) eat() bool {
 	if w.TakeStock(Food, 1) {
 		return true
 	}
 	for _, id := range w.Order() {
-		if b := w.Buildings[id]; b.Kind == KFarm && b.OutItem == Food && b.OutN > b.res[Food] {
+		if b := w.Buildings[id]; b.OutItem == Food && b.OutN > b.res[Food] {
 			b.OutN--
 			return true
 		}

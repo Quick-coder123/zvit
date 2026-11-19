@@ -26,6 +26,10 @@ const (
 	KFarm
 	KStation
 	KLab
+	KLumber
+	KForester
+	KGatherer
+	KSawmill
 	KindCount
 )
 
@@ -80,32 +84,52 @@ var Builds = [KindCount]BuildDef{
 	KHouse: {
 		Name: "Будинок", Size: 1, Buildable: true, HP: 150, Housing: 3,
 		Desc: "Житло на 3 особи. Де живуть хоча б двоє й є їжа, з часом народжується новий житель.",
-		Cost: []Stack{{Stone, 8}},
+		Cost: []Stack{{Wood, 6}, {Stone, 2}},
 	},
 	KFarm: {
 		Name: "Ферма", Size: 1, Buildable: true, HP: 120, Workers: 1,
 		Desc: "Вирощує їжу. Ставиться на чисту землю. Без їжі жителі слабшають і помирають.",
-		Cost: []Stack{{Stone, 4}, {IronOre, 4}},
+		Cost: []Stack{{Wood, 4}},
 	},
 	KChest: {
 		Name: "Склад", Size: 1, Buildable: true, HP: 150,
 		Desc: "Тримає 200 предметів. Поставлений біля виробництва, скорочує шлях носіям.",
-		Cost: []Stack{{Stone, 10}},
+		Cost: []Stack{{Wood, 8}, {Stone, 4}},
 	},
 	KStation: {
 		Name: "Вантажна станція", Size: 1, Buildable: true, HP: 200, Workers: 3,
 		Desc: "Три носії, які тільки переносять вантажі в радіусі 12 клітинок: вдвічі більше й швидше за вільних жителів.",
-		Cost: []Stack{{Stone, 12}, {IronOre, 12}},
+		Cost: []Stack{{Planks, 8}, {IronOre, 8}},
 	},
 	KLab: {
 		Name: "Дослідницька станція", Size: 1, Buildable: true, HP: 200, Workers: 1,
 		Desc: "Сюди жителі зносять матеріали для досліджень, а дослідник працює над ними. Кілька станцій досліджують швидше.",
-		Cost: []Stack{{Stone, 10}, {IronOre, 10}},
+		Cost: []Stack{{Planks, 6}, {Stone, 6}},
+	},
+	KLumber: {
+		Name: "Хатина лісоруба", Size: 1, Buildable: true, HP: 120, Workers: 1,
+		Desc: "Лісоруб рубає дорослі дерева в радіусі 6 клітинок і приносить деревину.",
+		Cost: []Stack{{Stone, 4}},
+	},
+	KForester: {
+		Name: "Хатина лісника", Size: 1, Buildable: true, HP: 120, Workers: 1,
+		Desc: "Лісник садить дерева на вільній землі в радіусі 6 клітинок. Саджанець виростає за 4 хв.",
+		Cost: []Stack{{Wood, 4}},
+	},
+	KGatherer: {
+		Name: "Хатина збирача", Size: 1, Buildable: true, HP: 120, Workers: 1,
+		Desc: "Збирач збирає ягоди з кущів у радіусі 6 клітинок — їжа без ферми. Ягоди відростають за 1.5 хв.",
+		Cost: []Stack{{Wood, 4}},
+	},
+	KSawmill: {
+		Name: "Тартак", Size: 1, Buildable: true, HP: 200, Workers: 1,
+		Desc: "Розпилює деревину на дошки.",
+		Cost: []Stack{{Wood, 8}, {Stone, 6}},
 	},
 	KMiner: {
 		Name: "Бур", Size: 1, Buildable: true, HP: 150, Workers: 1,
 		Desc: "Ставиться на клітинку покладу. Працівник видобуває сировину, носії відносять її на склад.",
-		Cost: []Stack{{IronOre, 12}},
+		Cost: []Stack{{Wood, 6}, {IronOre, 6}},
 	},
 	KFurnace: {
 		Name: "Піч", Size: 1, Buildable: true, HP: 200, Workers: 1,
@@ -169,7 +193,10 @@ func BuildTime(k Kind) float64 {
 }
 
 // IsCrafter reports kinds that run recipes.
-func (k Kind) IsCrafter() bool { b := k.Base(); return b == KFurnace || b == KAssembler }
+func (k Kind) IsCrafter() bool {
+	b := k.Base()
+	return b == KFurnace || b == KAssembler || b == KSawmill
+}
 
 // IsStorage reports kinds that hold the settlement's stock.
 func (k Kind) IsStorage() bool { return k == KCore || k == KChest }
@@ -196,6 +223,7 @@ var Recipes = []Recipe{
 	{In: []Stack{{IronPlate, 2}}, Out: Stack{Gear, 1}, Time: 2, Machine: KAssembler},
 	{In: []Stack{{CopperPlate, 1}}, Out: Stack{Wire, 2}, Time: 1.6, Machine: KAssembler},
 	{In: []Stack{{IronPlate, 1}, {CopperPlate, 1}}, Out: Stack{Ammo, 1}, Time: 2.4, Machine: KAssembler, Tech: "turret"},
+	{In: []Stack{{Wood, 2}}, Out: Stack{Planks, 1}, Time: 3, Machine: KSawmill},
 }
 
 // RecipesFor lists recipe indices usable in a machine kind (locked included).

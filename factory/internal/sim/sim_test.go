@@ -94,7 +94,7 @@ func TestPlacementRules(t *testing.T) {
 	}
 	// placing creates a site that needs materials, no instant payment
 	b := mustPlace(t, w, KChest, Pos{4, 4})
-	if !b.Site || len(b.Need) != 1 || b.Need[0] != (Stack{Stone, 10}) || w.Stock[Stone] != 30 {
+	if !b.Site || len(b.Need) != 2 || b.Need[0] != (Stack{Wood, 8}) || w.Stock[Wood] != 30 {
 		t.Fatalf("site: %+v stone=%d", b.Need, w.Stock[Stone])
 	}
 }

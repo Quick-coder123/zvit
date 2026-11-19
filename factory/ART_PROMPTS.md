@@ -96,6 +96,26 @@ Top-down view of a small construction site: wooden scaffolding frame #A3785B aro
 a few planks and stones inside. Transparent background.
 ```
 
+### `tree.png`: дерево
+```
+A single round leafy tree seen strictly from directly above: a fluffy round canopy in soft
+greens #4E8A55 and #6FA06A with a lighter highlight, no trunk visible. Transparent background.
+```
+
+### `bush.png`: кущ з ягодами
+```
+A small round berry bush seen from directly above: green leaves #5E9A62 with a few red
+berries #C0504D. Transparent background.
+```
+
+### `lumber.png`, `forester.png`, `gatherer.png`, `sawmill.png`: хатини
+```
+Small wooden hut seen strictly from directly above (roof only), square: a plank roof in warm
+wood #B08A5A. On the roof a simple emblem: [an axe | a sapling | a basket of red berries |
+a circular saw blade]. Transparent background.
+```
+(Згенеруй чотири варіанти, по одному на кожну емблему.)
+
 ## 3. Виробництво
 
 ### `miner_base.png`: бур, корпус (2×2)
@@ -231,6 +251,8 @@ angry eyes near the right edge. Minimal style, not gory. Transparent background.
 | `item_wire.png` | `A small coil of copper wire #D9894F` |
 | `item_ammo.png` | `Two brass cartridges #C9A227 side by side, bullets pointing up` |
 | `item_food.png` | `A small grain sack #C9B458 tied at the top with a green sprout` |
+| `item_wood.png` | `A short log #9C6B45 with a light round cut end` |
+| `item_planks.png` | `Three stacked light wooden planks #D9B27C` |
 
 ---
 
@@ -304,7 +326,7 @@ vector, centred, transparent background.
 
 **Ландшафт:** `ore_coal`, `ore_stone`, `ore_sand`
 
-**Поселення:** `house`, `farm`, `station`, `settler`, `site`
+**Поселення:** `house`, `farm`, `station`, `settler`, `site`, `tree`, `bush`, `lumber`, `forester`, `gatherer`, `sawmill`
 
 **Виробництво:** `miner_base`, `miner_head`, `furnace_off`, `furnace_on`, `assembler`, `chest`, `core`
 
@@ -312,10 +334,10 @@ vector, centred, transparent background.
 
 **Вороги:** `enemy_crawler`, `enemy_swarmer`, `enemy_brute`
 
-**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`, `item_food`
+**Предмети:** `item_iron_ore`, `item_copper_ore`, `item_coal`, `item_stone`, `item_sand`, `item_iron_plate`, `item_copper_plate`, `item_brick`, `item_glass`, `item_steel`, `item_gear`, `item_wire`, `item_ammo`, `item_food`, `item_wood`, `item_planks`
 
 **Ефекти:** `fx_muzzle`, `fx_flame`, `fx_splat`, `fx_ruin`
 
 **Інтерфейс:** `icon`, `menu`, `wave` (необов'язково), `research`
 
-Лишилось 43 картинки. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
+Лишилось 51 картинка. Не обов'язково робити всі одразу: гра підхоплюватиме ті, що є, а для решти лишатиметься нинішня графіка з коду.
