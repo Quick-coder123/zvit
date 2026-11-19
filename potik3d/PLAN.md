@@ -24,9 +24,12 @@ visible variety, without textures or image files.
    front of a wall with horizontal normal (nx, ny); it is emitted **only if that wall faces the
    camera** (`facing(nx, ny)`). Windows, doors, frames, signs and wall bands use it, so a detail
    on a back wall can never show through the front wall.
-3. **Roof-mounted parts** (chimneys, flag poles) are drawn **before** the roof when their
-   position is farther from the camera than the roof's centre (rotated depth compare via a new
-   `Batch.Farther(x, y, cx, cy) bool`), otherwise after it, so they never pop through the roof.
+3. **Roof-mounted parts** (chimneys, flag poles, the hall tower) sit on the roof's ridge line
+   (gable) or apex axis (pyramid) and **start at the roof's maximum height**, extending upward;
+   they are always drawn **after** the roof. Because the roof is entirely below that height and
+   the camera always looks down (pitch ≥ 0.45 rad), no roof face can cover them from any yaw, so
+   no depth comparison is needed. A chimney is therefore a short box standing on the ridge (a
+   stylised "ridge chimney"), not one buried in a slope.
 4. **House variety.** `HouseStyle(id int32) (variant, wall, roof int)` derived from a fixed hash
    of the building ID (stable across save/load; ID 0 = ghost gives variant 0, palette 0). Three
    variants:
@@ -34,8 +37,10 @@ visible variety, without textures or image files.
    - B hipped roof (Pyramid) with a small porch roof over the door on posts, chimney;
    - C narrow two-storey: taller box, upper window row, steep gable roof, chimney.
    Wall palette 4 colours, roof palette 3 colours. Door on the +y side for A/C and −x side for B.
-5. **Smoke.** Houses with `Residents > 0` and the hall show 3 small grey cubes rising from the
-   chimney, looping every 3 s with phase from the ID; drawn with `Alpha` 0.55, after the roof.
+5. **Smoke.** Only for real buildings: `ID != 0` (never for ghosts) and `!Site`. A finished house
+   smokes when `World.Residents(id) > 0`; the finished hall always smokes. 3 small grey cubes
+   rise from the chimney top, looping every 3 s with phase from the ID; drawn with `Alpha` 0.55
+   after the chimney.
 6. **Other buildings** (same footprint, same anchor):
    - Hall: stone plinth band, door, windows on all four sides, flag on a pole waving.
    - Warehouse: big double doors, 0–4 crates beside it in proportion to `Used()/Cap`.
@@ -60,8 +65,10 @@ changes to simulation or saves.
 A. Houses show at least 2 distinct variants in the demo town, each with door + windows; the
    variant for a given ID is identical across runs and after save/load (pure function of ID).
 B. No wall decal, chimney or flag is visible through a wall or roof: screenshots of the demo town
-   at yaw 0.55, 2.1, 3.7 and 5.2 show details only on visible faces.
-C. Smoke appears only over houses with residents (and the hall).
+   at yaw 0.55, 2.1, 3.7 and 5.2 and pitch 0.5 and 1.2 show details only on visible faces.
+C. Smoke appears only over finished houses with residents (and the hall); never over ghosts or
+   sites. Unit test `TestSmokeRule` checks the pure predicate `wantsSmoke(id, site, kind,
+   residents)` for ghost (ID 0), site, empty house, occupied house and hall.
 D. Warehouse crates, sawmill log pile, lumber/gatherer piles reflect state (none when empty).
 E. Triangle count on the demo town is ≤ 1.6× the baseline (decision 7).
 F. All existing tests pass; new `internal/view` unit tests: `TestHouseStyleStable` (same ID →
@@ -72,7 +79,8 @@ F. All existing tests pass; new `internal/view` unit tests: `TestHouseStyleStabl
 ## Verification
 - `cd potik3d && gofmt -l . && go vet ./... && go test ./...`
 - `./build.sh` builds `dist/potik3d.exe`.
-- Visual: `p3d -debug-shot town_{yaw}.png -debug-demo 600 -debug-vertical -debug-yaw {0.55,2.1,3.7,5.2} -debug-scale 70`
+- Visual: `p3d -debug-shot town_{yaw}.png -debug-demo 600 -debug-vertical -debug-yaw {0.55,2.1,3.7,5.2} -debug-scale 70` (pitch 0.85) and two shots at
+  `-debug-pitch 0.5` and `1.2`
   plus a selected-building shot; inspect each PNG.
 - Perf: `-debug-stats` on old vs. new models with identical flags; report both numbers.
 
