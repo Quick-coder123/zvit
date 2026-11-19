@@ -13,18 +13,18 @@ import (
 
 // toolbar groups; the hotkey for each slot is listed in toolKeys.
 var toolGroups = [][]sim.Kind{
-	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation},
+	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation, sim.KLab},
 	{sim.KMiner, sim.KFurnace, sim.KAssembler},
 	{sim.KWall, sim.KFlamer, sim.KTurret},
 }
 
 var toolKeys = []ebiten.Key{
-	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4,
-	ebiten.Key5, ebiten.Key6, ebiten.Key7,
+	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
+	ebiten.Key6, ebiten.Key7, ebiten.Key8,
 	ebiten.KeyZ, ebiten.KeyX, ebiten.KeyC,
 }
 
-var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "Z", "X", "C"}
+var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "Z", "X", "C"}
 
 func toolList() []sim.Kind {
 	var out []sim.Kind
@@ -111,13 +111,7 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 	}
 	// research button at the right of the toolbar
 	rb := rect{r.x + r.w + 10*u, r.y, 112 * u, r.h}
-	avail := 0
-	for i := range sim.Techs {
-		t := &sim.Techs[i]
-		if !g.w.Researched[t.ID] && g.w.TechAvailable(t) && g.affordable(t.Cost) {
-			avail++
-		}
-	}
+	avail := len(g.w.ResearchQueue)
 	panel(dst, rb, u)
 	g.panels = append(g.panels, rb)
 	bg := rgb(0xF7F4EE)
@@ -191,27 +185,52 @@ func (g *Game) drawResearch(dst *ebiten.Image) {
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
 	drawText(dst, "Дослідження", r.x+20*u, r.y+16*u, 20*u, true, colInk, alignLeft)
-	drawText(dst, "Платиш ресурсами з ядра — відкриваєш нові будівлі й прискорення. Доступні — зверху.", r.x+20*u, r.y+46*u, 12.5*u, false, colInkSoft, alignLeft)
+	sub := "Обери дослідження — жителі знесуть матеріали на дослідницьку станцію, а дослідник його завершить."
+	subC := colInkSoft
+	if !g.w.HasLab() {
+		sub, subC = "Немає дослідницької станції! Збудуй її (5) — без неї дослідження не просуваються.", colBad
+	}
+	drawText(dst, sub, r.x+20*u, r.y+46*u, 12.5*u, true, subC, alignLeft)
 	g.smallButton(dst, rect{r.x + W - 110*u, r.y + 14*u, 90 * u, 28 * u}, "Закрити", func() { g.research = false })
 
-	// order: affordable, available, locked, done
+	const (
+		stActive = iota
+		stQueued
+		stAvail
+		stLocked
+		stDone
+	)
 	order := make([]int, len(sim.Techs))
 	for i := range order {
 		order[i] = i
 	}
 	rank := func(i int) int {
 		t := &sim.Techs[i]
-		switch {
+		switch q := g.w.Queued(t.ID); {
 		case g.w.Researched[t.ID]:
-			return 3
-		case !g.w.TechAvailable(t):
-			return 2
-		case g.affordable(t.Cost):
-			return 0
+			return stDone
+		case q == 0:
+			return stActive
+		case q > 0:
+			return stQueued
 		}
-		return 1
+		for _, r := range t.Req {
+			if !g.w.Researched[r] && g.w.Queued(r) < 0 {
+				return stLocked
+			}
+		}
+		return stAvail
 	}
-	sort.SliceStable(order, func(a, b int) bool { return rank(order[a]) < rank(order[b]) })
+	sort.SliceStable(order, func(a, b int) bool {
+		ra, rb := rank(order[a]), rank(order[b])
+		if ra != rb {
+			return ra < rb
+		}
+		if ra == stQueued {
+			return g.w.Queued(sim.Techs[order[a]].ID) < g.w.Queued(sim.Techs[order[b]].ID)
+		}
+		return false
+	})
 
 	var tip *sim.Tech
 	for n, i := range order {
@@ -221,33 +240,45 @@ func (g *Game) drawResearch(dst *ebiten.Image) {
 		bg := rgb(0xF7F4EE)
 		border := colPanelLine
 		switch state {
-		case 0:
-			bg = mix(colBody, colOK, 0.12)
+		case stActive:
+			bg = mix(colBody, colOK, 0.22)
 			border = colOK
-		case 3:
+		case stQueued:
+			bg = mix(colBody, colOK, 0.1)
+			border = colOK
+		case stDone:
 			bg = rgb(0xEDE8DE)
 		}
 		hover := cr.has(g.mouseX, g.mouseY)
-		if hover && state <= 1 {
+		if hover && state <= stAvail {
 			bg = mix(bg, colOK, 0.15)
 		}
 		fillRoundRect(dst, float32(cr.x), float32(cr.y), float32(cr.w), float32(cr.h), float32(8*u), bg)
 		strokeRoundRect(dst, float32(cr.x), float32(cr.y), float32(cr.w), float32(cr.h), float32(8*u), float32(1.2*u), border)
 		nameC := colInk
-		if state >= 2 {
+		if state >= stLocked {
 			nameC = colInkSoft
 		}
 		drawText(dst, t.Name, cr.x+12*u, cr.y+8*u, 14*u, true, nameC, alignLeft)
-		if state == 3 {
+		switch state {
+		case stDone:
 			drawText(dst, "готово", cr.x+cr.w-12*u, cr.y+9*u, 12*u, true, colOK, alignRight)
+		case stActive:
+			drawText(dst, "зараз", cr.x+cr.w-12*u, cr.y+9*u, 12*u, true, colOK, alignRight)
+		case stQueued:
+			drawText(dst, fmt.Sprintf("черга %d", g.w.Queued(t.ID)), cr.x+cr.w-12*u, cr.y+9*u, 12*u, true, colOK, alignRight)
 		}
 		if ch >= 90*u {
-			drawText(dst, wrap(t.Desc, int(cw/(6.4*u))), cr.x+12*u, cr.y+30*u, 11.5*u, false, colInkSoft, alignLeft)
+			desc := wrap(t.Desc, int(cw/(7*u)))
+			if state == stActive || state == stLocked {
+				desc = firstLines(desc, 2)
+			}
+			drawText(dst, desc, cr.x+12*u, cr.y+30*u, 11.5*u, false, colInkSoft, alignLeft)
 		}
 		// cost / requirement line
 		y := cr.y + cr.h - 26*u
 		switch state {
-		case 2:
+		case stLocked:
 			names := ""
 			for j, req := range t.Req {
 				if j > 0 {
@@ -257,7 +288,19 @@ func (g *Game) drawResearch(dst *ebiten.Image) {
 			}
 			req := wrap("Потрібно: "+names, int(cw/(6.2*u)))
 			drawText(dst, req, cr.x+12*u, y+3*u-float64(countLines(req)-1)*15*u, 11*u, false, colInkSoft, alignLeft)
-		case 3:
+		case stDone:
+		case stActive:
+			d, wk := g.w.ResearchProgress()
+			label := fmt.Sprintf("матеріали %d%%", int(d*100))
+			f := d * 0.5
+			if d >= 1 {
+				label = fmt.Sprintf("дослідник працює: %d%%", int(wk*100))
+				f = 0.5 + wk*0.5
+			}
+			drawText(dst, label, cr.x+12*u, y, 11.5*u, true, colInk, alignLeft)
+			bw := cr.w - 24*u
+			fillRoundRect(dst, float32(cr.x+12*u), float32(y+17*u), float32(bw), float32(5*u), float32(2.5*u), rgb(0xE6E0D4))
+			fillRoundRect(dst, float32(cr.x+12*u), float32(y+17*u), float32(bw*f), float32(5*u), float32(2.5*u), colOK)
 		default:
 			x := cr.x + 12*u
 			for _, c := range t.Cost {
@@ -272,15 +315,26 @@ func (g *Game) drawResearch(dst *ebiten.Image) {
 				x += 26*u + textWidth(label, 12*u, true)
 			}
 		}
-		if state <= 1 {
-			id := t.ID
+		id := t.ID
+		switch state {
+		case stAvail:
 			g.addButton(cr, func() {
 				if err := g.w.Research(id); err != nil {
 					g.say("%v", err)
+				} else if g.w.Queued(id) == 0 {
+					g.say("Досліджуємо «%s»: жителі зносять матеріали", sim.TechByID(id).Name)
 				} else {
-					g.say("Досліджено: %s", sim.TechByID(id).Name)
+					g.say("«%s» додано в чергу", sim.TechByID(id).Name)
 				}
 			})
+		case stActive, stQueued:
+			g.addButton(cr, func() {
+				g.w.CancelResearch(id)
+				g.say("Дослідження «%s» скасовано", sim.TechByID(id).Name)
+			})
+			if hover {
+				tip = &sim.Tech{Name: "Клацни, щоб скасувати", Desc: "Принесені матеріали повернуться в ратушу. Залежні дослідження в черзі теж скасуються."}
+			}
 		}
 		if hover && ch < 90*u {
 			tip = t
@@ -339,11 +393,81 @@ func (g *Game) drawWaveHUD(dst *ebiten.Image) {
 		drawText(dst, "ядро", bx, by+10*u, 10.5*u, false, colInkSoft, alignLeft)
 		drawText(dst, fmt.Sprintf("знищено ворогів: %d", w.Kills), bx+bw, by+10*u, 10.5*u, false, colInkSoft, alignRight)
 	}
+	g.drawSpeed(dst, r)
+	next := r.y + r.h + 8*u
+	// research progress
+	if t := w.ActiveResearch(); t != nil {
+		rr := rect{r.x, next, r.w, 30 * u}
+		panel(dst, rr, u)
+		g.panels = append(g.panels, rr)
+		d, wk := w.ResearchProgress()
+		label := fmt.Sprintf("%s · матеріали %d%%", t.Name, int(d*100))
+		f := d * 0.5
+		if d >= 1 {
+			label, f = fmt.Sprintf("%s · досліджується %d%%", t.Name, int(wk*100)), 0.5+wk*0.5
+		}
+		c := colInk
+		if !w.HasLab() {
+			label, c = "Немає дослідницької станції (5)!", colBad
+		}
+		flask(dst, float32(rr.x+16*u), float32(rr.y+15*u), float32(16*u))
+		drawText(dst, label, rr.x+30*u, rr.y+6*u, 12*u, true, c, alignLeft)
+		fillRoundRect(dst, float32(rr.x+30*u), float32(rr.y+23*u), float32(rr.w-46*u), float32(3*u), float32(1.5*u), rgb(0xE6E0D4))
+		fillRoundRect(dst, float32(rr.x+30*u), float32(rr.y+23*u), float32((rr.w-46*u)*f), float32(3*u), float32(1.5*u), colOK)
+		g.addButton(rr, func() { g.research = true })
+		next += 38 * u
+	}
 	// rebuild button
 	if n := len(w.Ruins); n > 0 {
-		br := rect{r.x, r.y + r.h + 8*u, r.w, 32 * u}
+		br := rect{r.x, next, r.w, 32 * u}
 		g.smallButton(dst, br, fmt.Sprintf("Відбудувати зруйноване: %d (B)", n), g.rebuild)
+		next += 40 * u
 	}
+	g.hudBottom = next
+	if g.paused && !g.menu {
+		label := "ПАУЗА"
+		tw := textWidth(label, 18*u, true) + 40*u
+		pr := rect{g.cam.W/2 - tw/2, next + 4*u, tw, 34 * u}
+		fillRoundRect(dst, float32(pr.x), float32(pr.y), float32(pr.w), float32(pr.h), float32(17*u), rgba(0x2E3440, 0xE6))
+		drawText(dst, label, g.cam.W/2, pr.y+6*u, 18*u, true, colBG, alignCenter)
+		g.hudBottom = pr.y + pr.h + 8*u
+	}
+}
+
+// drawSpeed shows pause and speed buttons next to the wave panel.
+func (g *Game) drawSpeed(dst *ebiten.Image, wave rect) {
+	u := g.ui
+	bs := 30 * u
+	r := rect{wave.x + wave.w + 8*u, wave.y, bs*4 + 3*4*u + 16*u, wave.h}
+	panel(dst, r, u)
+	g.panels = append(g.panels, r)
+	for i := 0; i < 4; i++ {
+		i := i
+		br := rect{r.x + 8*u + float64(i)*(bs+4*u), r.y + (r.h-bs)/2 - 6*u, bs, bs}
+		active := (i == 0 && g.paused) || (i > 0 && !g.paused && g.speed == i)
+		bg := rgb(0xF0EBE1)
+		if active {
+			bg = mix(colBody, colOK, 0.45)
+		} else if br.has(g.mouseX, g.mouseY) {
+			bg = rgb(0xE5DED0)
+		}
+		fillRoundRect(dst, float32(br.x), float32(br.y), float32(br.w), float32(br.h), float32(6*u), bg)
+		cx, cy := float32(br.x+br.w/2), float32(br.y+br.h/2)
+		ic := colInk
+		if i == 0 {
+			fillRect(dst, cx-6*float32(u), cy-7*float32(u), 4*float32(u), 14*float32(u), ic)
+			fillRect(dst, cx+2*float32(u), cy-7*float32(u), 4*float32(u), 14*float32(u), ic)
+			g.addButton(br, g.togglePause)
+		} else {
+			sz := 10 * float32(u)
+			start := cx - float32(i-1)*sz*0.45
+			for k := 0; k < i; k++ {
+				triangle(dst, start+float32(k)*sz*0.9, cy, 0, sz, ic)
+			}
+			g.addButton(br, func() { g.setSpeed(i) })
+		}
+	}
+	drawText(dst, "пробіл · , .", r.x+r.w/2, r.y+r.h-17*u, 10*u, false, colInkSoft, alignCenter)
 }
 
 func (g *Game) rebuild() {
@@ -533,4 +657,18 @@ func (g *Game) drawWeapon(dst *ebiten.Image, b *sim.Building, cx, cy, w float32,
 		}
 		fillRoundRect(dst, bx, by, bw*f, max32(2, s*0.08), s*0.04, fade(c))
 	}
+}
+
+// firstLines keeps at most n lines of text, marking the cut with an ellipsis.
+func firstLines(s string, n int) string {
+	lines := 0
+	for i, c := range s {
+		if c == '\n' {
+			lines++
+			if lines == n {
+				return s[:i] + "…"
+			}
+		}
+	}
+	return s
 }

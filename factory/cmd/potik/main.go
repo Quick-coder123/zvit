@@ -74,6 +74,9 @@ func main() {
 			sim.BuildCombatDemo(w)
 		case "research":
 			w.Researched = map[string]bool{"furnace": true, "walls": true, "assembler": true, "chest": true}
+			w.Research("station")
+			w.Research("flamer")
+			w.Research("belt2")
 		}
 		g.SetScreenshot(*shot, *shotFrames, func(g *game.Game) { debugScene(g, w, *shotScene) })
 	}
@@ -93,7 +96,7 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 	case "overview":
 		g.DebugCamera(1, 0, 30)
 	case "town":
-		g.DebugCamera(0, 3, 56)
+		g.DebugCamera(-1, -1, 56)
 	case "close":
 		g.DebugCamera(6, -4, 64)
 	case "copper":

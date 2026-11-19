@@ -33,6 +33,8 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepTurret(b)
 		case KFlamer:
 			w.stepFlamer(b)
+		case KLab:
+			w.stepLab(b)
 		}
 	}
 	w.updateSettlers()

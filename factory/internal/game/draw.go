@@ -51,6 +51,7 @@ var (
 		sim.KHouse:     rgb(0xC97B4A),
 		sim.KFarm:      rgb(0x8DB360),
 		sim.KStation:   rgb(0xD4A373),
+		sim.KLab:       rgb(0x8E7CC3),
 	}
 )
 

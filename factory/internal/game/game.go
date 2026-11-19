@@ -57,8 +57,11 @@ type Game struct {
 	clipW     int
 	clipH     int
 	pasting   bool
-	iconMode  bool               // drawing toolbar icons, not the world
-	research  bool               // research panel open
+	iconMode  bool // drawing toolbar icons, not the world
+	research  bool // research panel open
+	paused    bool // simulation stopped by the player (Space)
+	speed     int  // simulation ticks per frame: 1, 2 or 3
+	hudBottom float64
 	stock     [sim.ItemCount]int // totals across storages, refreshed each frame
 
 	confirmNew  bool        // "start over?" dialog
@@ -108,7 +111,7 @@ func (g *Game) restartForUpdate() {
 // New creates the game around a world; savePath is used for autosave.
 func New(w *sim.World, savePath string) *Game {
 	loadTextures()
-	g := &Game{w: w, savePath: savePath, lastSave: time.Now(), help: w.Tick == 0}
+	g := &Game{w: w, savePath: savePath, lastSave: time.Now(), help: w.Tick == 0, speed: 1}
 	g.cam.Scale = 40
 	return g
 }
@@ -150,8 +153,10 @@ func (g *Game) Update() error {
 		return ebiten.Termination
 	}
 	g.handleInput()
-	if !g.menu {
-		g.w.Update(nil)
+	if !g.menu && !g.paused {
+		for i := 0; i < g.speed; i++ {
+			g.w.Update(nil)
+		}
 	}
 	if n := len(g.w.Notices); n > 0 {
 		g.say("%s", g.w.Notices[n-1])
@@ -220,6 +225,15 @@ func (g *Game) handleInput() {
 		default:
 			g.menu = !g.menu
 		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeySpace) && !g.menu {
+		g.togglePause()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyPeriod) || inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadAdd) {
+		g.setSpeed(g.speed + 1)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyComma) || inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadSubtract) {
+		g.setSpeed(g.speed - 1)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		g.help = !g.help
@@ -436,6 +450,22 @@ func (g *Game) handleInput() {
 				g.selected = 0
 			}
 		}
+	}
+}
+
+func (g *Game) togglePause() {
+	g.paused = !g.paused
+	if g.paused {
+		g.say("Пауза — можна будувати й планувати. Пробіл, щоб продовжити")
+	}
+}
+
+func (g *Game) setSpeed(v int) {
+	v = max(1, min(3, v))
+	g.paused = false
+	if v != g.speed {
+		g.speed = v
+		g.say("Швидкість ×%d", v)
 	}
 }
 

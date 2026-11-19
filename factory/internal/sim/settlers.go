@@ -331,6 +331,8 @@ func (w *World) deliver(b *Building, st Stack) int {
 			}
 		}
 		return n
+	case b.Kind == KLab:
+		return w.deliverResearch(st)
 	case b.Kind == KCore:
 		d := max(0, min(n, w.StorageCap(b)-w.StorageUsed(b)))
 		w.Stock[st.Item] += d
@@ -674,6 +676,13 @@ func (w *World) allocate() {
 					p = 0
 				}
 				ds = append(ds, demand{b, Coal, (FlamerFuelCap - have) / CoalFuel, p})
+			}
+		}
+	}
+	if lab := w.researchLab(); lab != nil {
+		for _, n := range w.ResearchNeed {
+			if left := n.N - pend(lab, n.Item); left > 0 {
+				ds = append(ds, demand{lab, n.Item, left, 2})
 			}
 		}
 	}

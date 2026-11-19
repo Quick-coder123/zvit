@@ -17,6 +17,7 @@ func BuildDemo(w *World) {
 		place(KMiner, 12, y)
 	}
 	place(KMinerBig, 14, -8)
+	place(KLab, -3, -5)
 	place(KChest, 10, -6)
 	place(KChest, -10, -4)
 	place(KChest, 3, -1)

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 4
+const SaveVersion = 5
 
 type saveFile struct {
 	Version   int
@@ -38,6 +38,11 @@ type saveFile struct {
 	NextSettler int32
 	WanderTimer float32
 	Deaths      int
+
+	// v5
+	ResearchQueue []string
+	ResearchNeed  []Stack
+	ResearchWork  float32
 }
 
 // Encode writes the world in the save format.
@@ -46,7 +51,8 @@ func (w *World) Encode(out io.Writer) error {
 	sf := saveFile{Version: SaveVersion, Seed: w.Seed, Tick: w.Tick, NextID: w.NextID, Stock: w.Stock[:],
 		Free: w.Free[:], Researched: w.Researched, Enemies: w.Enemies, Wave: w.Wave, NextWave: w.NextWave,
 		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills,
-		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths}
+		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths,
+		ResearchQueue: w.ResearchQueue, ResearchNeed: w.ResearchNeed, ResearchWork: w.ResearchWork}
 	for _, id := range w.Order() {
 		sf.Buildings = append(sf.Buildings, w.Buildings[id])
 	}
@@ -72,7 +78,8 @@ func Decode(in io.Reader) (*World, error) {
 	w := &World{Seed: sf.Seed, Tick: sf.Tick, NextID: sf.NextID, Buildings: map[int32]*Building{},
 		Researched: sf.Researched, Enemies: sf.Enemies, Wave: sf.Wave, NextWave: sf.NextWave,
 		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills,
-		Settlers: sf.Settlers, NextSettler: sf.NextSettler, WanderTimer: sf.WanderTimer, Deaths: sf.Deaths}
+		Settlers: sf.Settlers, NextSettler: sf.NextSettler, WanderTimer: sf.WanderTimer, Deaths: sf.Deaths,
+		ResearchQueue: sf.ResearchQueue, ResearchNeed: sf.ResearchNeed, ResearchWork: sf.ResearchWork}
 	copy(w.Stock[:], sf.Stock)
 	copy(w.Free[:], sf.Free)
 	if w.Researched == nil {
@@ -142,6 +149,9 @@ func Decode(in io.Reader) (*World, error) {
 		if w.Researched["chest"] || w.Researched["assembler"] {
 			w.Researched["station"] = true
 		}
+	}
+	if sf.Version < 5 {
+		w.Free[KLab]++ // research now happens at a research station
 	}
 	w.initCaches()
 	if sf.Version < 4 {

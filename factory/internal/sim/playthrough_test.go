@@ -47,6 +47,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 	try(KMiner, nearestOre(w, IronOre))
 	try(KFarm, freeSpot(w, Pos{-3, 3}))
 	try(KHouse, freeSpot(w, Pos{2, 3}))
+	try(KLab, freeSpot(w, Pos{-3, -4}))
 	step := 0
 	for sec := 0; sec < 15*60; sec++ {
 		run(w, 1)
@@ -57,10 +58,12 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 		case step == 1 && w.TotalStock(Stone) >= 8:
 			try(KHouse, freeSpot(w, Pos{4, 3}))
 			step++
-		case step == 2 && w.Research("furnace") == nil:
-			try(KFurnace, freeSpot(w, Pos{4, -3}))
+		case step == 2:
+			w.Research("furnace")
+			w.Research("walls")
 			step++
-		case step == 3 && w.Research("walls") == nil:
+		case step == 3 && w.Researched["furnace"]:
+			try(KFurnace, freeSpot(w, Pos{4, -3}))
 			step++
 		case step == 4:
 			try(KMiner, nearestOre(w, IronOre))
@@ -70,7 +73,10 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 			try(KHouse, freeSpot(w, Pos{0, 5}))
 			try(KHouse, freeSpot(w, Pos{2, 6}))
 			step++
-		case step == 6 && w.Research("station") == nil:
+		case step == 6:
+			w.Research("station")
+			step++
+		case step == 7 && w.Researched["station"]:
 			step++
 		}
 		if used, total := w.StorageTotals(); sec%20 == 0 && used*10 >= total*8 {
@@ -82,6 +88,8 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 		if sec%60 == 59 {
 			free, work, car, starving := w.RoleCounts()
 			used, total := w.StorageTotals()
+			d, wk := w.ResearchProgress()
+			t.Logf("   research queue %v delivered %.0f%% work %.0f%%", w.ResearchQueue, d*100, wk*100)
 			t.Logf("%2d min: pop %2d/%2d free %d work %d carriers %d starving %d storage %3d/%3d food %3d ore %3d stone %3d plates %3d wave %d deaths %d step %d",
 				(sec+1)/60, w.Population(), w.Housing(), free, work, car, starving, used, total, w.TotalStock(Food),
 				w.TotalStock(IronOre), w.TotalStock(Stone), w.TotalStock(IronPlate), w.Wave, w.Deaths, step)
@@ -96,7 +104,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 	if c := w.Core(); c.Dmg >= w.MaxHP(c)*0.5 {
 		t.Errorf("town hall badly damaged by the first waves")
 	}
-	if step < 6 {
+	if step < 8 {
 		t.Errorf("build order stalled at step %d", step)
 	}
 }

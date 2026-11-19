@@ -25,6 +25,7 @@ const (
 	KHouse
 	KFarm
 	KStation
+	KLab
 	KindCount
 )
 
@@ -95,6 +96,11 @@ var Builds = [KindCount]BuildDef{
 		Name: "Вантажна станція", Size: 1, Buildable: true, HP: 200, Workers: 3,
 		Desc: "Три носії, які тільки переносять вантажі в радіусі 12 клітинок: вдвічі більше й швидше за вільних жителів.",
 		Cost: []Stack{{Stone, 12}, {IronOre, 12}},
+	},
+	KLab: {
+		Name: "Дослідницька станція", Size: 1, Buildable: true, HP: 200, Workers: 1,
+		Desc: "Сюди жителі зносять матеріали для досліджень, а дослідник працює над ними. Кілька станцій досліджують швидше.",
+		Cost: []Stack{{Stone, 10}, {IronOre, 10}},
 	},
 	KMiner: {
 		Name: "Бур", Size: 1, Buildable: true, HP: 150, Workers: 1,

@@ -125,14 +125,18 @@ type World struct {
 
 	Free       [KindCount]int  // starter buildings that cost nothing
 	Researched map[string]bool // finished research
-	Enemies    []*Enemy
-	Wave       int     // waves spawned so far
-	NextWave   float64 // seconds until the next wave
-	WaveAngle  float64 // direction the next wave comes from (radians)
-	Peaceful   bool    // no waves
-	Ruins      []Spec  // destroyed buildings that can be rebuilt
-	Kills      int
-	Deaths     int
+
+	ResearchQueue []string // techs to research; the first is active
+	ResearchNeed  []Stack  // materials still to deliver for the active one
+	ResearchWork  float32  // 0..1 once materials are in
+	Enemies       []*Enemy
+	Wave          int     // waves spawned so far
+	NextWave      float64 // seconds until the next wave
+	WaveAngle     float64 // direction the next wave comes from (radians)
+	Peaceful      bool    // no waves
+	Ruins         []Spec  // destroyed buildings that can be rebuilt
+	Kills         int
+	Deaths        int
 
 	Shots   []Shot   // transient weapon effects (not saved)
 	Notices []string // messages for the UI (not saved)
@@ -153,6 +157,7 @@ func NewWorld(seed int64) *World {
 	w.Free[KMiner] = 1
 	w.Free[KFarm] = 1
 	w.Free[KHouse] = 1
+	w.Free[KLab] = 1
 	w.Stock[Food] = 40
 	w.Stock[Stone] = 30
 	w.Stock[IronOre] = 20

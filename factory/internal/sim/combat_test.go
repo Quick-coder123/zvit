@@ -2,27 +2,60 @@ package sim
 
 import "testing"
 
-func TestResearch(t *testing.T) {
-	w := NewWorld(5)
-	w.Stock = [ItemCount]int{}
+func TestResearchAtStation(t *testing.T) {
+	w := emptyWorld(4)
+	w.Researched = map[string]bool{}
+	w.Stock[IronOre], w.Stock[Stone] = 40, 40
 	if err := w.Research("assembler"); err != ErrPrereq {
-		t.Fatalf("assembler before furnace: %v", err)
+		t.Fatalf("assembler with nothing before it: %v", err)
 	}
-	if err := w.Research("furnace"); err != ErrNoFunds {
-		t.Fatalf("furnace without ore: %v", err)
+	if err := w.Research("furnace"); err != nil {
+		t.Fatal(err)
 	}
-	w.Stock[IronOre], w.Stock[Stone] = 30, 20
-	if err := w.Research("furnace"); err != nil || w.Stock[IronOre] != 0 || !w.Unlocked(KFurnace) {
-		t.Fatalf("research furnace: %v", err)
+	// queuing a follow-up is allowed once its prerequisite is queued
+	if err := w.Research("assembler"); err != nil {
+		t.Fatalf("queue assembler after furnace: %v", err)
 	}
-	if w.autoRecipe(KFurnace, IronPlate) >= 0 {
-		t.Fatal("steel should be locked")
+	if err := w.Research("furnace"); err != ErrQueued {
+		t.Fatalf("double queue: %v", err)
 	}
-	// research can be paid from storehouses too
-	ch := built(t, w, KChest, Pos{5, 5})
-	ch.Store = []Stack{{Stone, 30}, {IronOre, 30}}
-	if err := w.Research("station"); err != nil || ch.StoreCount() != 0 {
-		t.Fatalf("pay from storehouse: %v", err)
+	run(w, 60)
+	if w.Researched["furnace"] {
+		t.Fatal("research must not finish without a research station")
+	}
+	built(t, w, KLab, Pos{4, 3})
+	run(w, 30)
+	if w.Researched["furnace"] {
+		t.Fatal("research needs time after materials arrive")
+	}
+	run(w, 120)
+	if !w.Researched["furnace"] || !w.Unlocked(KFurnace) {
+		d, wk := w.ResearchProgress()
+		t.Fatalf("furnace not researched: delivered %.2f work %.2f need %v", d, wk, w.ResearchNeed)
+	}
+	if w.Stock[IronOre] != 10 || w.Stock[Stone] != 20 {
+		t.Fatalf("materials not consumed: ore %d stone %d", w.Stock[IronOre], w.Stock[Stone])
+	}
+	if a := w.ActiveResearch(); a == nil || a.ID != "assembler" {
+		t.Fatal("queue should move on to the assembler")
+	}
+}
+
+func TestCancelResearchRefunds(t *testing.T) {
+	w := emptyWorld(3)
+	w.Researched = map[string]bool{}
+	w.Stock[IronOre], w.Stock[Stone] = 40, 40
+	built(t, w, KLab, Pos{4, 3})
+	w.Research("furnace")
+	w.Research("assembler")
+	run(w, 20) // some materials delivered
+	w.CancelResearch("furnace")
+	run(w, 10) // let carriers drop anything in hand
+	if len(w.ResearchQueue) != 0 {
+		t.Fatalf("dependent research should be cancelled too: %v", w.ResearchQueue)
+	}
+	if got := w.TotalStock(IronOre) + w.TotalStock(Stone); got != 80 {
+		t.Fatalf("materials not refunded: %d", got)
 	}
 }
 

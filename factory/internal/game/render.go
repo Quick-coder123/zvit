@@ -214,6 +214,27 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 				}
 			}
 		}
+	case sim.KLab:
+		fh := bw * 0.52
+		path.MoveTo(cx-fh*0.14, cy-fh*0.55)
+		path.LineTo(cx-fh*0.14, cy-fh*0.1)
+		path.LineTo(cx-fh*0.5, cy+fh*0.45)
+		path.LineTo(cx+fh*0.5, cy+fh*0.45)
+		path.LineTo(cx+fh*0.14, cy-fh*0.1)
+		path.LineTo(cx+fh*0.14, cy-fh*0.55)
+		strokePath(dst, max32(1.2, s*0.06), fade(mix(acc, colInk, 0.4)))
+		path.MoveTo(cx-fh*0.32, cy+fh*0.2)
+		path.LineTo(cx-fh*0.44, cy+fh*0.4)
+		path.LineTo(cx+fh*0.44, cy+fh*0.4)
+		path.LineTo(cx+fh*0.32, cy+fh*0.2)
+		path.Close()
+		fillPath(dst, fade(acc))
+		if b.Working {
+			for k := 0; k < 3; k++ {
+				ph := math.Mod(t*0.8+float64(k)/3, 1)
+				fillCircle(dst, cx+float32(math.Sin(ph*6+float64(k)))*fh*0.12, cy-fh*float32(0.1+ph*0.6), max32(1, s*0.035), fade(rgba(0x8E7CC3, uint8(220*(1-ph)))))
+			}
+		}
 	case sim.KStation:
 		// a little cart
 		fillRoundRect(dst, cx-bw*0.3, cy-bw*0.2, bw*0.6, bw*0.32, s*0.06, fade(acc))

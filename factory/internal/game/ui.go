@@ -105,10 +105,7 @@ func (g *Game) drawUI(dst *ebiten.Image) {
 				a = (2.8 - age) / 0.6
 			}
 			tw := textWidth(g.toast, 15*u, true) + 32*u
-			ty := 92 * u
-			if len(g.w.Ruins) > 0 {
-				ty += 40 * u
-			}
+			ty := g.hudBottom + 4*u
 			r := rect{W/2 - tw/2, ty, tw, 38 * u}
 			fillRoundRect(dst, float32(r.x), float32(r.y), float32(r.w), float32(r.h), float32(19*u), rgba(0x2E3440, uint8(230*a)))
 			drawText(dst, g.toast, W/2, r.y+9*u, 15*u, true, rgba(0xF4F1EA, uint8(255*a)), alignCenter)
@@ -389,6 +386,32 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
 			return 22 * u
 		})
+	case sim.KLab:
+		add(func(y float64) float64 {
+			t := g.w.ActiveResearch()
+			if t == nil {
+				drawText(dst, "Нічого не досліджується.\nОбери дослідження у вікні (T).", r.x+pad, y, 12.5*u, false, colInkSoft, alignLeft)
+				return 40 * u
+			}
+			d, wk := g.w.ResearchProgress()
+			drawText(dst, "Зараз: "+t.Name, r.x+pad, y, 13*u, true, colInk, alignLeft)
+			msg := fmt.Sprintf("Матеріали: %d%%", int(d*100))
+			if d >= 1 {
+				msg = fmt.Sprintf("Матеріали на місці · робота %d%%", int(wk*100))
+			}
+			drawText(dst, msg, r.x+pad, y+20*u, 12.5*u, false, colInk, alignLeft)
+			x := r.x + pad
+			for _, n := range g.w.ResearchNeed {
+				drawItem(dst, n.Item, float32(x+8*u), float32(y+50*u), float32(15*u))
+				label := fmt.Sprint(n.N)
+				drawText(dst, label, x+18*u, y+42*u, 12.5*u, true, colInk, alignLeft)
+				x += 30*u + textWidth(label, 12.5*u, true)
+			}
+			if len(g.w.ResearchNeed) > 0 {
+				return 66 * u
+			}
+			return 44 * u
+		})
 	case sim.KFarm:
 		add(func(y float64) float64 {
 			drawItem(dst, sim.Food, float32(r.x+pad+9*u), float32(y+9*u), float32(18*u))
@@ -651,8 +674,8 @@ const helpText = `Розбудуй поселення, нагодуй жител
 тільки поки він усередині. Вільні жителі будують і переносять вантажі.
 Нема вільних рук — постав будівлю на паузу (P), і її працівник звільниться.
 
-1. На старті безкоштовні: бур, ферма і будинок. Постав бур (5) на поклад заліза,
-   ферму (2) на чисту землю, будинок (1) поруч із ратушею.
+1. На старті безкоштовні: бур, ферма, будинок і дослідницька станція. Постав бур (6)
+   на поклад заліза, ферму (2) на чисту землю, будинок (1) і станцію (5) поруч.
 2. Їжа: кожен житель їсть раз на 1.5 хв. Без їжі він слабшає, а за 2 хв помирає.
    Одна ферма годує ~11 жителів.
 3. Будинки дають житло; де живуть двоє й є їжа, народжуються нові жителі.
@@ -661,13 +684,15 @@ const helpText = `Розбудуй поселення, нагодуй жител
    Заповнились склади — виробництво стає. Склад біля шахти ще й скорочує шлях.
    Вантажна станція (4) дає трьох носіїв, які лише переносять вантажі —
    швидше й більше, у радіусі 12 клітинок.
-6. Дослідження (T) відкривають піч, збирач, зброю й покращення.
+6. Дослідження (T): обери одне чи кілька в черзі. Жителі знесуть матеріали на
+   дослідницьку станцію (5), а дослідник завершить роботу. Кілька станцій — швидше.
 7. Хвилі ворогів: стіни (Z), вогнемети (X) і турелі (C). Турелям потрібні
    працівник і боєприпаси — жителі принесуть їх зі складу.
 
 Керування
 ЛКМ — поставити / обрати · ПКМ — знести · P — пауза будівлі під курсором
 Tab — велика версія будівлі · R — повернути · Q — взяти будівлю під курсором
+Пробіл — пауза · , / . — повільніше / швидше (×1, ×2, ×3)
 Ctrl + тягни ЛКМ — скопіювати область · Ctrl + тягни ПКМ — знести область
 WASD або середня кнопка — камера · колесо — масштаб · Esc — меню`
 
