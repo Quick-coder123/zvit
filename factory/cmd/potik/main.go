@@ -95,6 +95,8 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 	switch scene {
 	case "overview":
 		g.DebugCamera(1, 0, 30)
+	case "river":
+		g.DebugCamera(-9, 8, 34)
 	case "nature":
 		g.DebugCamera(2, 8, 44)
 		if b := w.At(sim.Pos{X: 5, Y: 10}); b != nil {

@@ -15,6 +15,7 @@ import (
 var toolGroups = [][]sim.Kind{
 	{sim.KHouse, sim.KFarm, sim.KChest, sim.KStation, sim.KLab},
 	{sim.KLumber, sim.KForester, sim.KGatherer, sim.KSawmill},
+	{sim.KPump, sim.KDam, sim.KLevee},
 	{sim.KMiner, sim.KFurnace, sim.KAssembler},
 	{sim.KWall, sim.KFlamer, sim.KTurret},
 }
@@ -22,11 +23,12 @@ var toolGroups = [][]sim.Kind{
 var toolKeys = []ebiten.Key{
 	ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
 	ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
-	ebiten.Key0, ebiten.KeyF, ebiten.KeyG,
+	ebiten.Key0, ebiten.KeyH, ebiten.KeyJ,
+	ebiten.KeyM, ebiten.KeyF, ebiten.KeyG,
 	ebiten.KeyZ, ebiten.KeyX, ebiten.KeyC,
 }
 
-var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F", "G", "Z", "X", "C"}
+var toolKeyLabels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "H", "J", "M", "F", "G", "Z", "X", "C"}
 
 func toolList() []sim.Kind {
 	var out []sim.Kind
@@ -43,7 +45,7 @@ func lockGlyph(dst *ebiten.Image, cx, cy, s float32, c color.RGBA) {
 
 func (g *Game) drawToolbar(dst *ebiten.Image) {
 	u := g.ui
-	slot, gap, groupGap := 52*u, 5*u, 14*u
+	slot, gap, groupGap := 46*u, 4*u, 12*u
 	n := 0
 	for _, gr := range toolGroups {
 		n += len(gr)
@@ -86,9 +88,9 @@ func (g *Game) drawToolbar(dst *ebiten.Image) {
 				drawText(dst, label, sr.x+sr.w-5*u, sr.y+2*u, 10*u, true, lc, alignRight)
 			}
 			if unlocked {
-				g.iconBuilding(dst, shown, sr.x+9*u, sr.y+9*u, slot-18*u, sim.East)
+				g.iconBuilding(dst, shown, sr.x+7*u, sr.y+8*u, slot-14*u, sim.East)
 			} else {
-				g.iconBuilding(dst, k, sr.x+9*u, sr.y+9*u, slot-18*u, sim.East)
+				g.iconBuilding(dst, k, sr.x+7*u, sr.y+8*u, slot-14*u, sim.East)
 				fillRoundRect(dst, float32(sr.x), float32(sr.y), float32(sr.w), float32(sr.h), float32(8*u), rgba(0xF7F4EE, 0xC8))
 				lockGlyph(dst, float32(sr.x+sr.w/2), float32(sr.y+sr.h/2+2*u), float32(18*u), rgb(0x9AA0AC))
 			}
@@ -363,9 +365,14 @@ func (g *Game) drawWaveHUD(dst *ebiten.Image) {
 	var title string
 	tc := colInk
 	switch {
+	case w.Drought:
+		title = fmt.Sprintf("ПОСУХА · ще %s", fmtTime(w.SeasonLeft))
+		tc = rgb(0xC77B2E)
 	case w.Peaceful:
-		title = "Мирний режим"
-		tc = colOK
+		title = fmt.Sprintf("Сезон дощів · посуха через %s", fmtTime(w.SeasonLeft))
+		if w.SeasonLeft < 60 {
+			tc = rgb(0xC77B2E)
+		}
 	case len(w.Enemies) > 0:
 		title = fmt.Sprintf("Атака! Ворогів: %d", len(w.Enemies))
 		tc = colBad
@@ -392,8 +399,15 @@ func (g *Game) drawWaveHUD(dst *ebiten.Image) {
 		fillRoundRect(dst, float32(bx), float32(by), float32(bw), float32(8*u), float32(4*u), rgb(0xE6E0D4))
 		hc := mix(colBad, colOK, hp)
 		fillRoundRect(dst, float32(bx), float32(by), float32(bw*hp), float32(8*u), float32(4*u), hc)
-		drawText(dst, "ядро", bx, by+10*u, 10.5*u, false, colInkSoft, alignLeft)
-		drawText(dst, fmt.Sprintf("знищено ворогів: %d", w.Kills), bx+bw, by+10*u, 10.5*u, false, colInkSoft, alignRight)
+		drawText(dst, "ратуша", bx, by+10*u, 10.5*u, false, colInkSoft, alignLeft)
+		right := fmt.Sprintf("цикл %d", w.Cycle+1)
+		if !w.Peaceful {
+			right = fmt.Sprintf("хвиля %d через %s", w.Wave+1, fmtTime(w.NextWave))
+			if len(w.Enemies) > 0 {
+				right = fmt.Sprintf("атака: %d ворогів", len(w.Enemies))
+			}
+		}
+		drawText(dst, right, bx+bw, by+10*u, 10.5*u, false, colInkSoft, alignRight)
 	}
 	g.drawSpeed(dst, r)
 	next := r.y + r.h + 8*u

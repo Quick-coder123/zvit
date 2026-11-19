@@ -21,6 +21,30 @@ func nearestOre(w *World, it Item) Pos {
 	return best
 }
 
+// spotWhere finds the free tile nearest to near that satisfies ok.
+func spotWhere(w *World, near Pos, ok func(Pos) bool) Pos {
+	for r := 0; r < 40; r++ {
+		for y := -r; y <= r; y++ {
+			for x := -r; x <= r; x++ {
+				if p := near.Add(x, y); w.At(p) == nil && ok(p) {
+					return p
+				}
+			}
+		}
+	}
+	return near
+}
+
+func moistSpot(w *World, near Pos) Pos {
+	return spotWhere(w, near, func(p Pos) bool {
+		return w.MoistAt(p) && w.WaterAt(p) < 0.05 && w.OreAt(p) == ItemNone
+	})
+}
+
+func pumpSpot(w *World, near Pos) Pos {
+	return spotWhere(w, near, func(p Pos) bool { return w.CheckPlace(KPump, p, East) == nil })
+}
+
 func freeSpot(w *World, near Pos) Pos {
 	for r := 0; r < 20; r++ {
 		for y := -r; y <= r; y++ {
@@ -46,7 +70,8 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 		}
 	}
 	try(KMiner, nearestOre(w, IronOre))
-	try(KFarm, freeSpot(w, Pos{-3, 3}))
+	try(KFarm, moistSpot(w, Pos{-3, 3}))
+	try(KPump, pumpSpot(w, Pos{-3, 0}))
 	try(KHouse, freeSpot(w, Pos{2, 3}))
 	try(KLab, freeSpot(w, Pos{-3, -4}))
 	try(KLumber, freeSpot(w, Pos{5, 7}))
@@ -71,7 +96,8 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 			step++
 		case step == 4:
 			try(KMiner, nearestOre(w, IronOre))
-			try(KFarm, freeSpot(w, Pos{-5, 4}))
+			try(KFarm, moistSpot(w, Pos{-5, 4}))
+			try(KPump, pumpSpot(w, Pos{-3, -3}))
 			step++
 		case step == 5 && w.TotalStock(Wood) >= 14:
 			try(KHouse, freeSpot(w, Pos{0, 5}))
@@ -94,7 +120,7 @@ func TestEarlyGamePlaythrough(t *testing.T) {
 			used, total := w.StorageTotals()
 			d, wk := w.ResearchProgress()
 			t.Logf("   research queue %v delivered %.0f%% work %.0f%%", w.ResearchQueue, d*100, wk*100)
-			t.Logf("   wood %d", w.TotalStock(Wood))
+			t.Logf("   wood %d water %d drought %v season left %.0f", w.TotalStock(Wood), w.WaterAvailable(), w.Drought, w.SeasonLeft)
 			t.Logf("%2d min: pop %2d/%2d free %d work %d carriers %d starving %d storage %3d/%3d food %3d ore %3d stone %3d plates %3d wave %d deaths %d step %d",
 				(sec+1)/60, w.Population(), w.Housing(), free, work, car, starving, used, total, w.TotalStock(Food),
 				w.TotalStock(IronOre), w.TotalStock(Stone), w.TotalStock(IronPlate), w.Wave, w.Deaths, step)

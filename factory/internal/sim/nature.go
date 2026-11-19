@@ -40,12 +40,12 @@ var startForests = []struct {
 	x, y, r float64
 	veg     Veg
 }{
-	{7, 9, 4.5, VegTree},
-	{-7, 9, 2.5, VegBush},
+	{11, 8, 4.5, VegTree},
+	{-8, 4, 2.5, VegBush},
 }
 
 func (w *World) computeVeg(p Pos) Veg {
-	if w.OreAt(p) != ItemNone {
+	if w.OreAt(p) != ItemNone || w.genHeight(p) == 0 {
 		return VegNone
 	}
 	fx, fy := float64(p.X)+0.5, float64(p.Y)+0.5
@@ -100,6 +100,9 @@ func (w *World) VegAt(p Pos) (Veg, float64) {
 	case VegTree:
 		return v, 1
 	case VegBush:
+		if !w.MoistAt(p) {
+			return v, 0 // no berries on dry soil
+		}
 		if t, ok := w.Picked[p]; ok {
 			return v, math.Min(1, float64(w.Tick-t)/TPS/BushRegrow)
 		}
@@ -141,7 +144,7 @@ func (w *World) fieldTarget(b *Building, s *Settler) (Pos, bool) {
 			case KGatherer:
 				ok = v == VegBush && g >= 1
 			case KForester:
-				ok = v == VegNone && w.OreAt(p) == ItemNone && (p.X+p.Y)%2 == 0
+				ok = v == VegNone && w.OreAt(p) == ItemNone && (p.X+p.Y)%2 == 0 && w.MoistAt(p) && w.WaterAt(p) < 0.05
 			}
 			if !ok {
 				continue

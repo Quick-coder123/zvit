@@ -35,8 +35,11 @@ func (w *World) Update(active ActiveFunc) {
 			w.stepFlamer(b)
 		case KLab:
 			w.stepLab(b)
+		case KPump:
+			w.stepPump(b)
 		}
 	}
+	w.updateWater()
 	w.updateSettlers()
 	w.updateCombat()
 }
@@ -101,7 +104,7 @@ func (w *World) stepMiner(b *Building) {
 }
 
 func (w *World) stepFarm(b *Building) {
-	if b.OutN >= OutCap {
+	if b.OutN >= OutCap || !w.MoistAt(b.Pos) {
 		b.Working = false
 		return
 	}

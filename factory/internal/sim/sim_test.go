@@ -106,7 +106,7 @@ func TestStarterSettlement(t *testing.T) {
 		t.Fatalf("start pop %d housing %d", w.Population(), w.Housing())
 	}
 	m := mustPlace(t, w, KMiner, ironSpot(t, w))
-	f := mustPlace(t, w, KFarm, Pos{-4, 4})
+	f := mustPlace(t, w, KFarm, moistSpot(w, Pos{-4, 4}))
 	h := mustPlace(t, w, KHouse, Pos{3, 4})
 	if len(m.Need)+len(f.Need)+len(h.Need) != 0 {
 		t.Fatal("starter buildings should be free")
@@ -195,7 +195,8 @@ func TestStarvation(t *testing.T) {
 func TestFarmFeeds(t *testing.T) {
 	w := emptyWorld(4)
 	w.Stock[Food] = 2
-	built(t, w, KFarm, Pos{-4, 4})
+	built(t, w, KFarm, moistSpot(w, Pos{-4, 4}))
+	built(t, w, KPump, pumpSpot(w, Pos{-4, 0}))
 	run(w, 400)
 	if w.Deaths != 0 {
 		t.Fatalf("%d starved despite a farm", w.Deaths)

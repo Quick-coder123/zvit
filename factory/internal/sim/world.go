@@ -49,6 +49,7 @@ type Building struct {
 	res     map[Item]int // items promised to haulers (outputs, storage)
 	builder int32        // settler building this site
 	hungry  bool         // a worker inside is starving
+	flooded bool         // under water
 }
 
 func (b *Building) Size() int { return Builds[b.Kind].Size }
@@ -63,10 +64,14 @@ func (b *Building) Covers(p Pos) bool {
 func (b *Building) Staff() int  { return b.staff }
 func (b *Building) Inside() int { return b.inside }
 
-// Running reports whether the building is complete, switched on and staffed.
+// Running reports whether the building is complete, switched on, staffed
+// and not under water.
 func (b *Building) Running() bool {
-	return !b.Site && !b.Paused && b.inside >= Builds[b.Kind].Workers
+	return !b.Site && !b.Paused && !b.flooded && b.inside >= Builds[b.Kind].Workers
 }
+
+// IsFlooded reports whether water stopped the building (for the UI).
+func (b *Building) IsFlooded() bool { return b.flooded }
 
 // StoreCount is the total number of items held in a storehouse.
 func (b *Building) StoreCount() int {
@@ -131,6 +136,12 @@ type World struct {
 	Cleared map[Pos]bool   // natural trees/bushes removed
 	Picked  map[Pos]uint64 // tick a bush was last picked
 
+	// Water and seasons
+	Water      []float32 // depth per tile of the water region
+	Drought    bool
+	SeasonLeft float64 // seconds left in the current season
+	Cycle      int     // completed wet+drought cycles
+
 	ResearchQueue []string // techs to research; the first is active
 	ResearchNeed  []Stack  // materials still to deliver for the active one
 	ResearchWork  float32  // 0..1 once materials are in
@@ -149,6 +160,14 @@ type World struct {
 	grid       map[Pos]int32
 	chunks     map[Pos]*[chunkSize * chunkSize]Item
 	fullWarned uint64
+
+	height     []uint8
+	wall       []float32
+	moist      []bool
+	springs    []int
+	sinks      []int
+	flux       []float32 // 4 outflows per water cell
+	wallsDirty bool
 	vegChunks  map[Pos]*[vegChunkTiles]Veg
 	order      []int32
 	dirty      bool
@@ -165,7 +184,10 @@ func NewWorld(seed int64) *World {
 	w.Free[KHouse] = 1
 	w.Free[KLab] = 1
 	w.Free[KLumber] = 1
+	w.Free[KPump] = 1
 	w.Stock[Wood] = 30
+	w.Stock[Water] = 40
+	w.SeasonLeft = w.WetLength(0)
 	w.Stock[Food] = 40
 	w.Stock[Stone] = 30
 	w.Stock[IronOre] = 20
@@ -197,6 +219,7 @@ func (w *World) initCaches() {
 	for _, b := range w.Buildings {
 		w.mark(b, b.ID)
 	}
+	w.initWater()
 }
 
 func (w *World) mark(b *Building, id int32) {
@@ -219,6 +242,7 @@ func (w *World) add(b *Building) *Building {
 	w.Buildings[b.ID] = b
 	w.mark(b, b.ID)
 	w.dirty = true
+	w.wallsDirty = true
 	return b
 }
 
@@ -333,6 +357,9 @@ var (
 	ErrCore     = errors.New("ратушу не можна знести")
 	ErrLocked   = errors.New("спершу відкрий це в дослідженнях (T)")
 	ErrLegacy   = errors.New("цієї будівлі більше немає")
+	ErrWater    = errors.New("тут вода — будувати можна лише греблі, насипи й насоси")
+	ErrNoWater  = errors.New("насос треба ставити біля води")
+	ErrDry      = errors.New("ферма потребує вологого ґрунту біля води")
 )
 
 // CanAfford reports whether the materials for a building exist in storage
@@ -365,6 +392,21 @@ func (w *World) CheckPlace(k Kind, p Pos, d Dir) error {
 	}
 	if k == KFarm && w.OreAt(p) != ItemNone {
 		return ErrOnOre
+	}
+	if k != KPump && waterBlock(k) == 0 {
+		for y := 0; y < s; y++ {
+			for x := 0; x < s; x++ {
+				if w.WaterAt(p.Add(x, y)) > BuildMaxWet {
+					return ErrWater
+				}
+			}
+		}
+	}
+	if k == KPump && !w.nearWater(p, s) {
+		return ErrNoWater
+	}
+	if k == KFarm && !w.MoistAt(p) {
+		return ErrDry
 	}
 	return nil
 }
@@ -493,6 +535,7 @@ func (w *World) unplace(b *Building) {
 	w.mark(b, 0)
 	delete(w.Buildings, b.ID)
 	w.dirty = true
+	w.wallsDirty = true
 	for _, s := range w.Settlers {
 		if s.Job == b.ID {
 			s.Job, s.Inside = 0, false

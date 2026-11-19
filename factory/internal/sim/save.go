@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SaveVersion = 7
+const SaveVersion = 8
 
 type saveFile struct {
 	Version   int
@@ -48,6 +48,12 @@ type saveFile struct {
 	Planted []PosTick
 	Cleared []Pos
 	Picked  []PosTick
+
+	// v8
+	Water      []float32
+	Drought    bool
+	SeasonLeft float64
+	Cycle      int
 }
 
 // PosTick pairs a tile with a tick (vegetation changes in saves).
@@ -63,7 +69,8 @@ func (w *World) Encode(out io.Writer) error {
 		Free: w.Free[:], Researched: w.Researched, Enemies: w.Enemies, Wave: w.Wave, NextWave: w.NextWave,
 		WaveAngle: w.WaveAngle, Peaceful: w.Peaceful, Ruins: w.Ruins, Kills: w.Kills,
 		Settlers: w.Settlers, NextSettler: w.NextSettler, WanderTimer: w.WanderTimer, Deaths: w.Deaths,
-		ResearchQueue: w.ResearchQueue, ResearchNeed: w.ResearchNeed, ResearchWork: w.ResearchWork}
+		ResearchQueue: w.ResearchQueue, ResearchNeed: w.ResearchNeed, ResearchWork: w.ResearchWork,
+		Water: w.Water, Drought: w.Drought, SeasonLeft: w.SeasonLeft, Cycle: w.Cycle}
 	for p, t := range w.Planted {
 		sf.Planted = append(sf.Planted, PosTick{p, t})
 	}
@@ -101,7 +108,8 @@ func Decode(in io.Reader) (*World, error) {
 		Researched: sf.Researched, Enemies: sf.Enemies, Wave: sf.Wave, NextWave: sf.NextWave,
 		WaveAngle: sf.WaveAngle, Peaceful: sf.Peaceful, Ruins: sf.Ruins, Kills: sf.Kills,
 		Settlers: sf.Settlers, NextSettler: sf.NextSettler, WanderTimer: sf.WanderTimer, Deaths: sf.Deaths,
-		ResearchQueue: sf.ResearchQueue, ResearchNeed: sf.ResearchNeed, ResearchWork: sf.ResearchWork}
+		ResearchQueue: sf.ResearchQueue, ResearchNeed: sf.ResearchNeed, ResearchWork: sf.ResearchWork,
+		Water: sf.Water, Drought: sf.Drought, SeasonLeft: sf.SeasonLeft, Cycle: sf.Cycle}
 	copy(w.Stock[:], sf.Stock)
 	copy(w.Free[:], sf.Free)
 	w.Planted, w.Cleared, w.Picked = map[Pos]uint64{}, map[Pos]bool{}, map[Pos]uint64{}
@@ -191,6 +199,13 @@ func Decode(in io.Reader) (*World, error) {
 	}
 	if sf.Version < 5 {
 		w.Free[KLab]++ // research now happens at a research station
+	}
+	if sf.Version < 8 {
+		// rivers, droughts and thirst arrived
+		w.Free[KPump]++
+		w.Stock[Water] += 60
+		w.SeasonLeft = w.WetLength(0)
+		w.Water = nil
 	}
 	if sf.Version < 7 {
 		w.Free[KLumber]++ // wood became the main building material

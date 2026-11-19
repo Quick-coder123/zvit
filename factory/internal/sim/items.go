@@ -21,6 +21,7 @@ const (
 	Food
 	Wood
 	Planks
+	Water
 	ItemCount
 )
 
@@ -38,6 +39,7 @@ const (
 	ShapeFood               // grain sack
 	ShapeLog                // log
 	ShapeBoard              // planks
+	ShapeDrop               // water
 )
 
 type ItemDef struct {
@@ -64,6 +66,7 @@ var Items = [ItemCount]ItemDef{
 	Food:        {"Їжа", 0xC9B458, ShapeFood},
 	Wood:        {"Деревина", 0x9C6B45, ShapeLog},
 	Planks:      {"Дошки", 0xD9B27C, ShapeBoard},
+	Water:       {"Вода", 0x5DA9D6, ShapeDrop},
 }
 
 // Stack is an amount of one item.

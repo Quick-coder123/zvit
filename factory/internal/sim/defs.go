@@ -30,6 +30,9 @@ const (
 	KForester
 	KGatherer
 	KSawmill
+	KPump
+	KDam
+	KLevee
 	KindCount
 )
 
@@ -120,6 +123,21 @@ var Builds = [KindCount]BuildDef{
 		Name: "Хатина збирача", Size: 1, Buildable: true, HP: 120, Workers: 1,
 		Desc: "Збирач збирає ягоди з кущів у радіусі 6 клітинок — їжа без ферми. Ягоди відростають за 1.5 хв.",
 		Cost: []Stack{{Wood, 4}},
+	},
+	KPump: {
+		Name: "Насос", Size: 1, Buildable: true, HP: 150, Workers: 1,
+		Desc: "Ставиться біля води. Працівник качає воду — жителі п'ють її раз на хвилину. Запасайте воду до посухи.",
+		Cost: []Stack{{Wood, 6}, {Stone, 2}},
+	},
+	KDam: {
+		Name: "Гребля", Size: 1, Buildable: true, HP: 300,
+		Desc: "Тримає воду на 1 рівень вище, надлишок переливається. Перегородіть річку, щоб пережити посуху.",
+		Cost: []Stack{{Wood, 4}, {Stone, 6}},
+	},
+	KLevee: {
+		Name: "Насип", Size: 1, Buildable: true, HP: 400,
+		Desc: "Висока земляна стіна: вода крізь неї не проходить. Захищає від затоплення.",
+		Cost: []Stack{{Stone, 6}, {Wood, 2}},
 	},
 	KSawmill: {
 		Name: "Тартак", Size: 1, Buildable: true, HP: 200, Workers: 1,

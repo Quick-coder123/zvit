@@ -30,9 +30,9 @@ func unit(h uint64) float64 { return float64(h>>11) / float64(1<<53) }
 // startPatches guarantee a playable start near the core.
 var startPatches = []patch{
 	{cx: 13, cy: -5, r: 6.5, item: IronOre, phase: 0.3},
-	{cx: -13, cy: -6, r: 5.5, item: CopperOre, phase: 1.7},
-	{cx: 3, cy: 13, r: 4.5, item: Coal, phase: 2.2},
-	{cx: -10, cy: 10, r: 4.5, item: Stone, phase: 0.9},
+	{cx: 4, cy: -16, r: 5.5, item: CopperOre, phase: 1.7},
+	{cx: 6, cy: 15, r: 4, item: Coal, phase: 2.2},
+	{cx: -2, cy: 13, r: 4.5, item: Stone, phase: 0.9},
 	{cx: 22, cy: 16, r: 4, item: Sand, phase: 4.1},
 }
 
@@ -79,6 +79,9 @@ func (w *World) chunkPatches(cx, cy int) []patch {
 }
 
 func (w *World) computeOre(p Pos) Item {
+	if w.genHeight(p) == 0 {
+		return ItemNone // nothing to mine on the river bed
+	}
 	ccx, ccy := floorDiv(p.X, chunkSize), floorDiv(p.Y, chunkSize)
 	fx, fy := float64(p.X)+0.5, float64(p.Y)+0.5
 	best := ItemNone

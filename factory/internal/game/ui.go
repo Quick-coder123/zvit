@@ -132,11 +132,11 @@ func (g *Game) drawStock(dst *ebiten.Image) {
 		}
 	}
 	rows := max((len(items)+1)/2, 1)
-	r := rect{14 * u, 14 * u, 250 * u, (50 + float64(rows)*26 + 108) * u}
+	r := rect{14 * u, 14 * u, 250 * u, (50 + float64(rows)*26 + 130) * u}
 	panel(dst, r, u)
 	g.panels = append(g.panels, r)
 	g.drawTown(dst, r.x+14*u, r.y+10*u)
-	r.y += 108 * u
+	r.y += 130 * u
 	line(dst, float32(r.x+14*u), float32(r.y), float32(r.x+r.w-14*u), float32(r.y), float32(u), colPanelLine)
 	drawText(dst, "Запаси", r.x+14*u, r.y+10*u, 14*u, true, colInk, alignLeft)
 	used, total := g.w.StorageTotals()
@@ -195,14 +195,21 @@ func (g *Game) drawTown(dst *ebiten.Image, x, y float64) {
 	drawItem(dst, sim.Food, float32(x+8*u), float32(y+77*u), float32(16*u))
 	mins := w.FoodMinutes()
 	fc := colInk
-	msg := fmt.Sprintf("їжа %d · вистачить на %s", w.FoodAvailable(), fmtMinutes(mins))
+	msg := fmt.Sprintf("їжа %d · на %s", w.FoodAvailable(), fmtMinutes(mins))
 	switch {
 	case starving > 0:
-		fc, msg = colBad, fmt.Sprintf("Голодують: %d! Потрібні ферми", starving)
+		fc, msg = colBad, fmt.Sprintf("Голод/спрага: %d! Їжа й вода!", starving)
 	case mins < 3:
 		fc = colBad
 	}
 	drawText(dst, msg, x+22*u, y+68*u, 12.5*u, true, fc, alignLeft)
+	drawItem(dst, sim.Water, float32(x+8*u), float32(y+99*u), float32(16*u))
+	wm := w.WaterMinutes()
+	wc := colInk
+	if wm < 3 {
+		wc = colBad
+	}
+	drawText(dst, fmt.Sprintf("вода %d · на %s", w.WaterAvailable(), fmtMinutes(wm)), x+22*u, y+90*u, 12.5*u, true, wc, alignLeft)
 }
 
 func fmtMinutes(m float64) string {
@@ -358,6 +365,12 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			return 24 * u
 		})
 	}
+	if b.IsFlooded() {
+		add(func(y float64) float64 {
+			drawText(dst, "Затоплено! Будівля не працює,\nпоки вода не спаде.", r.x+pad, y, 12.5*u, true, colBad, alignLeft)
+			return 42 * u
+		})
+	}
 	if b.Dmg > 0 {
 		add(func(y float64) float64 {
 			max := g.w.MaxHP(b)
@@ -385,6 +398,16 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			}
 			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
 			return 22 * u
+		})
+	case sim.KPump:
+		add(func(y float64) float64 {
+			msg := fmt.Sprintf("Качає воду: 1 за %.0f с.\nЖитель п'є раз на хвилину.", sim.PumpTime)
+			c := colInk
+			if b.Site == false && !b.Working && b.Running() {
+				msg, c = "Немає води поруч —\nрічка обміліла або висохла.", colBad
+			}
+			drawText(dst, msg, r.x+pad, y, 12.5*u, false, c, alignLeft)
+			return 42 * u
 		})
 	case sim.KLumber, sim.KForester, sim.KGatherer:
 		add(func(y float64) float64 {
@@ -427,6 +450,15 @@ func (g *Game) drawInfo(dst *ebiten.Image, b *sim.Building) {
 			return 44 * u
 		})
 	case sim.KFarm:
+		add(func(y float64) float64 {
+			if g.w.MoistAt(b.Pos) {
+				drawText(dst, "Ґрунт вологий — поле росте.", r.x+pad, y, 12.5*u, true, colOK, alignLeft)
+			} else {
+				drawText(dst, "Сухий ґрунт — поле не росте.\nЧекай дощів або тримай воду греблею.", r.x+pad, y, 12.5*u, true, colBad, alignLeft)
+				return 42 * u
+			}
+			return 24 * u
+		})
 		add(func(y float64) float64 {
 			drawItem(dst, sim.Food, float32(r.x+pad+9*u), float32(y+9*u), float32(18*u))
 			drawText(dst, fmt.Sprintf("Їжа · %.1f/хв · годує ~%d жителів", 60/sim.FarmTime, int(math.Floor(sim.MealInterval/sim.FarmTime))), r.x+pad+26*u, y, 13*u, false, colInk, alignLeft)
@@ -682,29 +714,27 @@ func (g *Game) drawConfirmNew(dst *ebiten.Image) {
 	g.bigButton(dst, yes, "Так, почати заново", g.newGame)
 }
 
-const helpText = `Розбудуй поселення: дерево, камінь, руда, їжа — і дедалі складніші товари.
+const helpText = `Розбудуй поселення біля річки й переживи посухи.
 
-Жителі — це все. Будівля з працівником (бур, піч, ферма, лісоруб…) працює, тільки
-коли він на місці. Вільні жителі будують і переносять вантажі — кілька завжди
-лишаються вільними. Бракує рук — постав будівлю на паузу (P).
+Жителі працюють у будівлях і переносять вантажі (кілька завжди вільні).
+Бракує рук — постав будівлю на паузу (P). Жителі їдять раз на 1.5 хв і п'ють раз на хвилину.
 
-1. Безкоштовні на старті: будинок (1), ферма (2), дослідницька станція (5),
-   лісоруб (6) і бур (0). Ліс — на південному сході, кущі з ягодами — на південному заході.
-2. Деревина — головний будматеріал. Лісник (7) садить дерева біля лісоруба,
-   збирач (8) приносить ягоди, тартак (9) робить дошки.
-3. Їжа: житель їсть раз на 1.5 хв, без їжі слабшає й за 2 хв помирає.
-4. Будинки дають житло; де живуть двоє й є їжа, народжуються нові жителі.
-5. Місце обмежене: ратуша — 300, склад (3) — 200 предметів. Вантажна станція (4)
-   дає носіїв, що лише переносять вантажі в радіусі 12.
-6. Дослідження (T): матеріали зносять на дослідницьку станцію, потім дослідник
-   працює. Піч (F), збирач (G), зброя й покращення — там.
-7. Вороги вимкнені — їх можна ввімкнути в меню (Esc). Тоді: стіни (Z),
-   вогнемети (X), турелі (C).
+Вода й сезони
+· Річка тече із заходу від ратуші. Сезон дощів змінюється посухою (таймер угорі):
+  у посуху річка міліє, ґрунт висихає, ферми й ягоди не родять.
+· Насос (0) біля води дає питну воду — запасайте її на склади до посухи.
+· Гребля (H) тримає воду на рівень вище: загатіть річку, щоб вода лишилась на посуху.
+  Насип (J) — висока стіна, вода крізь неї не проходить.
+· Ферми (2) ростуть лише на вологому ґрунті (зеленуватий відтінок біля води).
 
-Керування
+Будівництво
+1-5 будинок, ферма, склад, вантажна станція, дослідницька станція
+6-9 лісоруб, лісник, збирач ягід, тартак · M бур · F піч · G збирач
+Дослідження (T): матеріали зносять на станцію, потім дослідник працює.
+Вороги вимкнені — їх можна ввімкнути в меню (Esc).
+
 ЛКМ — поставити / обрати · ПКМ — знести · P — пауза будівлі · Tab — версія 2×2
-Пробіл — пауза гри · , / . — швидкість · Q — взяти будівлю під курсором
-Ctrl + тягни ЛКМ / ПКМ — скопіювати / знести область · WASD, колесо — камера`
+Пробіл — пауза гри · , / . — швидкість · Ctrl + тягни — копіювати / знести область`
 
 func (g *Game) drawHelp(dst *ebiten.Image) {
 	u := g.ui

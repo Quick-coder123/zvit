@@ -34,6 +34,8 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 	tx1, ty1 := int(math.Ceil(x1))+1, int(math.Ceil(y1))+1
 	s := float32(cam.Scale)
 
+	g.drawTerrain(dst, tx0, ty0, tx1, ty1)
+
 	// ore deposits
 	for y := ty0; y <= ty1; y++ {
 		for x := tx0; x <= tx1; x++ {
@@ -76,6 +78,7 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 		}
 	}
 
+	g.drawWater(dst, tx0, ty0, tx1, ty1)
 	g.drawVegetation(dst, tx0, ty0, tx1, ty1)
 	g.drawRuins(dst)
 
@@ -125,6 +128,24 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 	}
 
 	switch b.Kind {
+	case sim.KDam, sim.KLevee:
+		c := rgb(0x9C7A55)
+		if b.Kind == sim.KLevee {
+			c = rgb(0xA89C8C)
+		}
+		fillRoundRect(dst, x+s*0.02, y+s*0.06, s*0.96, s*0.96, s*0.1, fade(rgba(0x2E3440, 0x26)))
+		fillRoundRect(dst, x+s*0.02, y+s*0.02, s*0.96, s*0.96, s*0.1, fade(c))
+		lc := fade(mix(c, colInk, 0.3))
+		if b.Kind == sim.KDam {
+			for k := 1; k < 4; k++ {
+				fx := x + s*float32(k)*0.25
+				line(dst, fx, y+s*0.08, fx, y+s*0.92, max32(1, s*0.04), lc)
+			}
+			fillRect(dst, x+s*0.06, y+s*0.06, s*0.88, s*0.12, fade(rgba(0x5DA9D6, 0x99)))
+		} else {
+			fillRoundRect(dst, x+s*0.16, y+s*0.16, s*0.68, s*0.68, s*0.2, fade(mix(c, colBody, 0.25)))
+		}
+		return
 	case sim.KWall:
 		stone := rgb(0xB9AE9E)
 		fillRoundRect(dst, x+s*0.03, y+s*0.07, s*0.94, s*0.94, s*0.12, fade(rgba(0x2E3440, 0x26)))
@@ -236,6 +257,14 @@ func (g *Game) drawBuilding(dst *ebiten.Image, b *sim.Building, alpha float64) {
 				fillCircle(dst, cx+float32(math.Sin(ph*6+float64(k)))*fh*0.12, cy-fh*float32(0.1+ph*0.6), max32(1, s*0.035), fade(rgba(0x8E7CC3, uint8(220*(1-ph)))))
 			}
 		}
+	case sim.KPump:
+		fillRoundRect(dst, cx-bw*0.12, cy-bw*0.3, bw*0.24, bw*0.55, s*0.05, fade(rgb(0x6B7385)))
+		line(dst, cx, cy-bw*0.25, cx+bw*0.3, cy-bw*0.35, max32(1.5, s*0.06), fade(colInk))
+		drawItem(dst, sim.Water, cx-bw*0.24, cy+bw*0.22, s*0.3)
+		if b.Working {
+			ph := float32(math.Mod(t*2, 1))
+			fillCircle(dst, cx+bw*0.18, cy+bw*(0.05+0.25*ph), max32(1, s*0.04), fade(rgba(0x5DA9D6, uint8(255*(1-ph)))))
+		}
 	case sim.KLumber:
 		// axe
 		line(dst, cx-bw*0.2, cy+bw*0.25, cx+bw*0.15, cy-bw*0.2, max32(1.5, s*0.08), fade(rgb(0x6B4F3A)))
@@ -317,6 +346,12 @@ func (g *Game) drawStatus(dst *ebiten.Image, b *sim.Building, x, y, w float32) {
 	r := max32(5, s*0.17)
 	cx, cy := x+w-r*0.6, y+r*0.6
 	switch {
+	case b.IsFlooded():
+		fillCircle(dst, cx, cy, r, rgba(0x2F7FB8, 0xE6))
+		drawItem(dst, sim.Water, cx, cy, r*1.3)
+	case b.Kind == sim.KFarm && !b.Site && !g.w.MoistAt(b.Pos):
+		fillCircle(dst, cx, cy, r, rgba(0xC77B2E, 0xE6))
+		fillRect(dst, cx-r*0.5, cy-r*0.08, r, r*0.16, colBody)
 	case b.Paused:
 		fillCircle(dst, cx, cy, r, rgba(0x2E3440, 0xDD))
 		fillRect(dst, cx-r*0.4, cy-r*0.45, r*0.28, r*0.9, colBG)
@@ -485,6 +520,68 @@ func (g *Game) drawVegetation(dst *ebiten.Image, tx0, ty0, tx1, ty1 int) {
 						fillCircle(dst, sx+float32(math.Cos(a))*r*0.55, sy+float32(math.Sin(a))*r*0.55, max32(1.2, s*0.05), rgb(0xC0504D))
 					}
 				}
+			}
+		}
+	}
+}
+
+var heightTint = [5]color.RGBA{
+	rgba(0xB8A98A, 0x90), // river bed
+	rgba(0xCDBF9F, 0x60), // bank
+	{},                   // plain
+	rgba(0xFFFFFF, 0x30),
+	rgba(0xFFFFFF, 0x58),
+}
+
+// drawTerrain tints the ground by height and shades the steps between levels.
+func (g *Game) drawTerrain(dst *ebiten.Image, tx0, ty0, tx1, ty1 int) {
+	s := float32(g.cam.Scale)
+	w := g.w
+	for y := ty0; y <= ty1; y++ {
+		for x := tx0; x <= tx1; x++ {
+			p := sim.Pos{X: x, Y: y}
+			h := w.HeightAt(p)
+			sx, sy := g.cam.ToScreen(float64(x), float64(y))
+			if h != 2 && h >= 0 && h < len(heightTint) {
+				fillRect(dst, sx, sy, s+0.5, s+0.5, heightTint[h])
+			}
+			if w.Drought && h >= 1 {
+				fillRect(dst, sx, sy, s+0.5, s+0.5, rgba(0xE0B865, 0x1E))
+			} else if h >= 1 && w.MoistAt(p) && w.WaterAt(p) < 0.05 {
+				fillRect(dst, sx, sy, s+0.5, s+0.5, rgba(0x7FAE5A, 0x22))
+			}
+			// steps between heights: shadow below, highlight on top
+			if hb := w.HeightAt(sim.Pos{X: x, Y: y + 1}); hb < h {
+				fillRect(dst, sx, sy+s*0.82, s+0.5, s*0.18, rgba(0x2E3440, uint8(0x22*min(h-hb, 3))))
+			}
+			if hr := w.HeightAt(sim.Pos{X: x + 1, Y: y}); hr < h {
+				fillRect(dst, sx+s*0.88, sy, s*0.12, s+0.5, rgba(0x2E3440, uint8(0x16*min(h-hr, 3))))
+			}
+		}
+	}
+}
+
+// drawWater draws water depth with a gentle shimmer.
+func (g *Game) drawWater(dst *ebiten.Image, tx0, ty0, tx1, ty1 int) {
+	s := float32(g.cam.Scale)
+	t := float64(g.w.Tick) / sim.TPS
+	shallow, deep := rgb(0x8CCBE8), rgb(0x2F7FB8)
+	for y := ty0; y <= ty1; y++ {
+		for x := tx0; x <= tx1; x++ {
+			d := g.w.WaterAt(sim.Pos{X: x, Y: y})
+			if d < 0.02 {
+				continue
+			}
+			sx, sy := g.cam.ToScreen(float64(x), float64(y))
+			k := math.Min(1, d/1.6)
+			c := mix(shallow, deep, k)
+			a := 0.45 + 0.45*math.Min(1, d*1.5)
+			c = color.RGBA{uint8(float64(c.R) * a), uint8(float64(c.G) * a), uint8(float64(c.B) * a), uint8(255 * a)}
+			fillRect(dst, sx, sy, s+0.5, s+0.5, c)
+			if s >= 14 && d > 0.15 {
+				ph := math.Mod(t*0.6+float64(x)*0.37+float64(y)*0.21, 1)
+				lx := sx + s*float32(ph)
+				line(dst, lx-s*0.18, sy+s*0.4, lx+s*0.12, sy+s*0.4, max32(1, s*0.04), rgba(0xFFFFFF, 0x44))
 			}
 		}
 	}

@@ -40,9 +40,31 @@ func BuildDemo(w *World) {
 	place(KForester, 9, 12)
 	place(KGatherer, -6, 9)
 	place(KSawmill, 6, 3)
-	place(KFarm, -1, 7)
-	place(KFarm, 1, 7)
-	place(KFarm, 3, 7)
+	nearest := func(near Pos, ok func(Pos) bool) Pos {
+		for r := 0; r < 30; r++ {
+			for y := -r; y <= r; y++ {
+				for x := -r; x <= r; x++ {
+					if p := near.Add(x, y); w.At(p) == nil && ok(p) {
+						return p
+					}
+				}
+			}
+		}
+		return near
+	}
+	for i := 0; i < 3; i++ {
+		p := nearest(Pos{-7, 6 + i}, func(p Pos) bool { return w.CheckPlace(KFarm, p, East) == nil })
+		place(KFarm, p.X, p.Y)
+	}
+	for i := 0; i < 2; i++ {
+		p := nearest(Pos{-8, 1 + 3*i}, func(p Pos) bool { return w.CheckPlace(KPump, p, East) == nil })
+		place(KPump, p.X, p.Y)
+	}
+	for x := -22; x <= -6; x++ {
+		if p := (Pos{x, 16}); w.HeightAt(p) <= 1 {
+			place(KDam, p.X, p.Y)
+		}
+	}
 	// an unfinished site waiting for a builder
 	w.Place(KFurnace, Pos{5, 0}, East, 0)
 	c := w.Core()

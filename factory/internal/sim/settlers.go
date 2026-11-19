@@ -36,6 +36,8 @@ type Settler struct {
 	FieldY     int
 	FieldT     float32
 
+	DrinkIn  float32 // seconds until the next drink
+	Thirst   float32 // seconds spent without water
 	MealIn   float32 // seconds until the next meal
 	Starving float32 // seconds spent without food
 	Seed     float32 // per-settler variation for idle wandering
@@ -49,6 +51,8 @@ const (
 	StationRadius = 12.0
 	MealInterval  = 90.0  // a settler eats one food this often
 	StarveDeath   = 120.0 // seconds of starving before death
+	DrinkInterval = 60.0  // a settler drinks one water this often
+	ThirstDeath   = 150.0 // seconds without water before death
 	BirthTime     = 75.0  // seconds for a home with two adults and food
 	WandererTime  = 60.0  // a newcomer arrives when the town is (almost) empty
 	allocEvery    = 15    // ticks between job/haul planning passes
@@ -56,16 +60,17 @@ const (
 
 func (s *Settler) idle() bool { return s.Task == TaskNone && s.Carry.N == 0 }
 
-// Starved reports whether the settler is currently going hungry.
-func (s *Settler) Starved() bool { return s.Starving > 0 }
+// Starved reports whether the settler is going hungry or thirsty.
+func (s *Settler) Starved() bool { return s.Starving > 0 || s.Thirst > 0 }
 
 func (w *World) spawnSettler(at *Building) *Settler {
 	w.NextSettler++
 	x, y := at.center()
 	s := &Settler{
 		ID: w.NextSettler, X: x, Y: y + float64(at.Size())/2 + 0.4,
-		MealIn: float32(MealInterval*0.5 + float64(w.NextSettler%7)*6),
-		Seed:   float32(unit(hash3(w.Seed, int(w.NextSettler), 0, 77)) * 6.28),
+		MealIn:  float32(MealInterval*0.5 + float64(w.NextSettler%7)*6),
+		DrinkIn: float32(DrinkInterval*0.5 + float64(w.NextSettler%5)*5),
+		Seed:    float32(unit(hash3(w.Seed, int(w.NextSettler), 0, 77)) * 6.28),
 	}
 	w.Settlers = append(w.Settlers, s)
 	return s
@@ -100,6 +105,9 @@ func (w *World) speed(s *Settler) float64 {
 	}
 	if s.Starved() {
 		v *= 0.6
+	}
+	if w.WaterAt(Pos{int(math.Floor(s.X)), int(math.Floor(s.Y))}) > 0.4 {
+		v *= 0.5 // wading
 	}
 	return v
 }
@@ -167,6 +175,11 @@ func (w *World) updateSettlers() {
 			w.notice("Житель помер від голоду. Потрібна їжа — став ферми!")
 			continue
 		}
+		if s.Thirst >= ThirstDeath {
+			w.Deaths++
+			w.notice("Житель помер від спраги. Потрібні насоси й запас води!")
+			continue
+		}
 		w.Settlers[k] = s
 		k++
 	}
@@ -194,6 +207,17 @@ func (w *World) stepSettler(s *Settler) {
 		}
 	}
 
+	s.DrinkIn -= DT
+	if s.DrinkIn <= 0 {
+		if w.drink() {
+			s.DrinkIn = DrinkInterval
+			s.Thirst = 0
+		} else {
+			s.DrinkIn = 0
+			s.Thirst += DT
+		}
+	}
+
 	switch s.Task {
 	case TaskHaul:
 		w.stepHaul(s)
@@ -212,6 +236,7 @@ func (w *World) stepSettler(s *Settler) {
 			site.BuildWork += float32(DT * rate / BuildTime(site.Kind))
 			if site.BuildWork >= 1 {
 				site.Site, site.BuildWork = false, 0
+				w.wallsDirty = true
 				s.Task = TaskNone
 			}
 		}
@@ -399,7 +424,7 @@ func (w *World) nearestStorage(x, y float64, n int, exclude int32) *Building {
 
 func (w *World) updateBirths() {
 	pop, cap := len(w.Settlers), w.Housing()
-	food := w.TotalStock(Food)
+	food := min(w.TotalStock(Food), w.WaterAvailable())
 	starving := false
 	for _, s := range w.Settlers {
 		if s.Starved() {
@@ -465,6 +490,7 @@ func (w *World) rebuildBookkeeping() {
 	for _, b := range w.Buildings {
 		b.staff, b.inside, b.builder, b.hungry = 0, 0, 0, false
 		b.pend, b.res = nil, nil
+		b.flooded = w.Flooded(b)
 	}
 	add := func(m *map[Item]int, it Item, n int) {
 		if *m == nil {
@@ -868,6 +894,39 @@ func (w *World) eat() bool {
 		}
 	}
 	return false
+}
+
+// WaterAvailable counts drinking water in storage and at pumps.
+func (w *World) WaterAvailable() int {
+	n := w.TotalStock(Water)
+	for _, b := range w.Buildings {
+		if b.OutItem == Water {
+			n += b.OutN
+		}
+	}
+	return n
+}
+
+// drink takes one water from storage or straight from a pump.
+func (w *World) drink() bool {
+	if w.TakeStock(Water, 1) {
+		return true
+	}
+	for _, id := range w.Order() {
+		if b := w.Buildings[id]; b.OutItem == Water && b.OutN > b.res[Water] {
+			b.OutN--
+			return true
+		}
+	}
+	return false
+}
+
+// WaterMinutes estimates how long the drinking water lasts.
+func (w *World) WaterMinutes() float64 {
+	if len(w.Settlers) == 0 {
+		return math.Inf(1)
+	}
+	return float64(w.WaterAvailable()) * DrinkInterval / float64(len(w.Settlers)) / 60
 }
 
 // FoodMinutes estimates how long the available food lasts.

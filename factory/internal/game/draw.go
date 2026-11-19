@@ -56,6 +56,9 @@ var (
 		sim.KForester:  rgb(0x6FA06A),
 		sim.KGatherer:  rgb(0xC0504D),
 		sim.KSawmill:   rgb(0xB08A5A),
+		sim.KPump:      rgb(0x5DA9D6),
+		sim.KDam:       rgb(0x8C6B4A),
+		sim.KLevee:     rgb(0xA89C8C),
 	}
 )
 
@@ -218,6 +221,14 @@ func drawItem(dst *ebiten.Image, it sim.Item, cx, cy, s float32) {
 		line(dst, cx-h*0.35, cy-h*0.45, cx+h*0.35, cy-h*0.45, max32(1, s*0.08), dark)
 		line(dst, cx, cy-h*0.45, cx-h*0.2, cy-h*0.85, max32(1, s*0.06), rgb(0x8DB360))
 		line(dst, cx, cy-h*0.45, cx+h*0.25, cy-h*0.8, max32(1, s*0.06), rgb(0x8DB360))
+	case sim.ShapeDrop:
+		path.MoveTo(cx, cy-h*0.9)
+		path.QuadTo(cx+h*0.75, cy+h*0.05, cx+h*0.5, cy+h*0.45)
+		path.QuadTo(cx, cy+h*1.0, cx-h*0.5, cy+h*0.45)
+		path.QuadTo(cx-h*0.75, cy+h*0.05, cx, cy-h*0.9)
+		path.Close()
+		fillPath(dst, c)
+		fillCircle(dst, cx-h*0.2, cy+h*0.2, h*0.15, rgba(0xFFFFFF, 0xAA))
 	case sim.ShapeLog:
 		fillRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, c)
 		strokeRoundRect(dst, cx-h*0.9, cy-h*0.4, h*1.8, h*0.8, h*0.4, max32(1, s*0.06), dark)
