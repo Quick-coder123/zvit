@@ -12,9 +12,12 @@ import (
 
 // Ghost is a building preview shown under the cursor.
 type Ghost struct {
-	Kind world.Kind
-	X, Y int
-	OK   bool
+	Kind   world.Kind
+	X, Y   int
+	OK     bool
+	Dir    int // stairs direction
+	Levels int // platform/bridge levels, stairs rise
+	Base   int // level the building stands on (supports: the ground)
 }
 
 // Scene renders a world.
@@ -121,6 +124,9 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 	front := map[int][]*world.Building{}
 	for _, id := range w.Order() {
 		bd := w.Buildings[id]
+		if bd.Kind.IsSupport() {
+			continue // drawn with their tile, below anything on top
+		}
 		fi := s.frontTile(bd.X, bd.Y, bd.Size())
 		front[fi] = append(front[fi], bd)
 	}
@@ -201,16 +207,25 @@ func (s *Scene) Draw(dst *ebiten.Image, w *world.World) {
 			b.Poly(wc, [3]float64{fx, fy, wz}, [3]float64{fx + 1, fy, wz}, [3]float64{fx + 1, fy + 1, wz}, [3]float64{fx, fy + 1, wz})
 		}
 
+		if sp := w.Support(i); sp != nil {
+			hov := s.Hover[0] == x && s.Hover[1] == y && s.Ghost == nil
+			drawSupport(b, w, sp, top, t, sp.ID == s.Selected || hov, sp.Levels)
+		}
 		for _, bd := range front[i] {
-			base := float64(w.Height[world.Idx(bd.X, bd.Y)]) * LevelH
+			base := float64(w.Surface(world.Idx(bd.X, bd.Y))) * LevelH
 			drawBuilding(b, w, bd, base, t, bd.ID == s.Selected)
 		}
 		if i == ghostTile {
 			g := s.Ghost
-			gb := &world.Building{Kind: g.Kind, X: g.X, Y: g.Y}
-			base := float64(w.Height[world.Idx(g.X, g.Y)]) * LevelH
+			gb := &world.Building{Kind: g.Kind, X: g.X, Y: g.Y, Dir: g.Dir, Levels: g.Levels}
+			base := float64(g.Base) * LevelH
 			b.Alpha = 0.6
-			drawBuilding(b, w, gb, base, t, false)
+			if g.Kind.IsSupport() {
+				drawSupport(b, w, gb, base, t, false, g.Levels)
+				base += float64(g.Levels) * LevelH
+			} else {
+				drawBuilding(b, w, gb, base, t, false)
+			}
 			col := rgba(0x4FA3A5, 0xC0)
 			if !g.OK {
 				col = rgba(0xE07A5F, 0xC0)
@@ -301,7 +316,7 @@ func (s *Scene) Pick(w *world.World, mx, my float64) (int, int, bool) {
 	for k := len(order) - 1; k >= 0; k-- {
 		i := order[k]
 		x, y := i%world.Size, i/world.Size
-		z := float64(w.Height[i]) * LevelH
+		z := float64(w.Surface(i)) * LevelH
 		var px, py [4]float64
 		corners := [4][2]float64{{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 		for n, co := range corners {

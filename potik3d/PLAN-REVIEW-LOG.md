@@ -32,3 +32,16 @@ Result: /tmp/claude-0/-home-user-zvit/8be25a58-6c00-516c-93d1-58bd5ed4e097/scrat
 
 ## Build
 - Builder: Claude (host). Pre-build commit: see commit after 'approved plan'.
+- Pre-build commit: b1dbfe2002e2a84e3c16a79992e45cb1fd3a673c. Builder: Claude (host); all code authored by Claude.
+- Host proof: gofmt clean, go vet clean, go test ./... pass (new: TestPlatformHouse, TestPlatformStack, TestStairsPath, TestStairRemovalReplans, TestCanStepMatchesOldRule, TestBridgeCross, TestDemolishSupport, TestFieldWorkSkipsSupports, TestVerticalSaveRoundTrip); build.sh ok; screenshots checked (terrace+house+stairs, bridge, stairs ghost with error).
+- Deviation: criterion D "FindPath fails before bridges" — the generated river has fords elsewhere, so the test instead checks deep tiles are impassable before and passable after, and that the bridge path is direct and shorter than the detour.
+
+## Inspection 1 — fresh Codex session, verdict REVISE
+Result: /tmp/claude-0/-home-user-zvit/8be25a58-6c00-516c-93d1-58bd5ed4e097/scratchpad/claudex/inspect1/claudex-f43qmdw3/result.json
+- M2-1 (medium) "dams can be placed on platforms / level-0 via WaterOK" → REJECTED with evidence: elevated placement of Dam/Farm/Pump returns ErrGroundOnly (build.go, GroundOnly switch after the footprint loop; TestPlatformStack asserts it). Dam on level-0 water is the pre-existing intended rule (old CanPlaceAt skipped water/h==0 checks when inWater=true; dams are meant to cross the river). Added TestDamPlacementUnchanged to pin both. No production code changed.
+
+## Inspection 2 — fresh Codex session, verdict REVISE
+Result: /tmp/claude-0/-home-user-zvit/8be25a58-6c00-516c-93d1-58bd5ed4e097/scratchpad/claudex/inspect2/claudex-yg62vwur/result.json
+- M2-1 rejection not contested.
+- M2-R1 (medium) PlanPlacement indexes Builds before range check → ACCEPTED, fixed (range check first) + TestPlanPlacementBadKind.
+- Inspection budget (2) exhausted: the M2-R1 fix (4 lines in build.go + 1 test) is NOT independently inspected. Host re-ran full proof after the fix: gofmt/vet clean, go test ./... pass, build.sh ok.

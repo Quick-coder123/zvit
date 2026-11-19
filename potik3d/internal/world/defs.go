@@ -53,6 +53,9 @@ const (
 	KSawmill
 	KDam
 	KCampfire
+	KPlatform
+	KStairs
+	KBridge
 	KindCount
 )
 
@@ -64,10 +67,11 @@ const (
 	CatFood
 	CatWood
 	CatWater
+	CatBuild
 	CatCount
 )
 
-var CategoryNames = [CatCount]string{"Поселення", "Їжа", "Ліс", "Вода"}
+var CategoryNames = [CatCount]string{"Поселення", "Їжа", "Ліс", "Вода", "Будова"}
 
 type BuildDef struct {
 	Name     string
@@ -109,7 +113,20 @@ var Builds = [KindCount]BuildDef{
 		Desc: "Зберігає 60 води — запас на посуху."},
 	KDam: {Name: "Гребля", Size: 1, WaterOK: true, Cat: CatWater, Cost: []Stack{{Log, 4}},
 		Desc: "Тримає воду на 1 рівень вище. Перегородіть річку, щоб пережити посуху."},
+	KPlatform: {Name: "Помост", Size: 1, Cat: CatBuild, Cost: []Stack{{Log, 2}, {Plank, 3}},
+		Desc: "Піднімає землю на 1 рівень; ставте ще раз зверху — до 3 рівнів. На помості можна будувати."},
+	KStairs: {Name: "Сходи", Size: 1, Cat: CatBuild, Cost: []Stack{{Log, 2}, {Plank, 2}},
+		Desc: "Ведуть на 1–2 рівні вгору до сусідньої клітинки. Самі розвертаються до уступу."},
+	KBridge: {Name: "Міст", Size: 1, WaterOK: true, Cat: CatBuild, Cost: []Stack{{Log, 3}, {Plank, 2}},
+		Desc: "Прохід над водою чи проваллям. Висота сама підлаштовується під берег; вода тече під ним."},
 }
+
+// IsSupport reports structures that carry a walkable surface (and maybe a
+// building on top) instead of occupying the tile's top layer.
+func (k Kind) IsSupport() bool { return k == KPlatform || k == KBridge }
+
+// MaxStack is the highest a platform or bridge can raise a surface.
+const MaxStack = 3
 
 func (k Kind) Def() *BuildDef { return &Builds[k] }
 

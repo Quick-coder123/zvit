@@ -335,7 +335,7 @@ func (g *Game) input() {
 		x, y := g.footprint(g.tool)
 		place := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft)
 		// dams and fields can be painted by dragging
-		if !place && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && (g.tool == world.KDam || g.tool == world.KFarm) {
+		if !place && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && (g.tool == world.KDam || g.tool == world.KFarm || g.tool == world.KBridge) {
 			place = g.w.CheckPlace(g.tool, x, y) == nil
 		}
 		if place {
@@ -348,7 +348,11 @@ func (g *Game) input() {
 		return
 	}
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		if b := g.w.BuildingAt(g.hoverX, g.hoverY); b != nil {
+		b := g.w.BuildingAt(g.hoverX, g.hoverY)
+		if b == nil {
+			b = g.w.SupportAt(g.hoverX, g.hoverY)
+		}
+		if b != nil {
 			g.selected = b.ID
 		} else {
 			g.selected = 0
@@ -402,7 +406,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	s.Ghost, s.Radius, s.Selected = nil, [3]float64{}, g.selected
 	if g.tool != world.KNone && g.hoverX >= 0 {
 		x, y := g.footprint(g.tool)
-		s.Ghost = &view.Ghost{Kind: g.tool, X: x, Y: y, OK: g.w.CheckPlace(g.tool, x, y) == nil}
+		s.Ghost = g.ghost(x, y)
 		if r := world.Builds[g.tool].Radius; r > 0 {
 			sz := float64(world.Builds[g.tool].Size) / 2
 			s.Radius = [3]float64{float64(x) + sz, float64(y) + sz, float64(r) + 0.5}
@@ -439,3 +443,44 @@ func (g *Game) Debug(help bool, tool world.Kind, selectHall bool, yaw, scale flo
 		}
 	}
 }
+
+// ghost previews the current tool at a spot with its automatic choices.
+func (g *Game) ghost(x, y int) *view.Ghost {
+	p, err := g.w.PlanPlacement(g.tool, x, y)
+	gh := &view.Ghost{Kind: g.tool, X: x, Y: y, OK: err == nil, Dir: p.Dir, Levels: p.Levels, Base: p.Base}
+	if err != nil && world.In(x, y) {
+		i := world.Idx(x, y)
+		gh.Base, gh.Levels = g.w.Surface(i), 1
+		if g.tool.IsSupport() {
+			gh.Base = int(g.w.Height[i])
+			if sp := g.w.Support(i); sp != nil {
+				gh.Levels = sp.Levels
+			}
+		}
+	}
+	return gh
+}
+
+var dirNames = [4]string{"схід", "захід", "південь", "північ"}
+
+// placementHint describes what a successful placement will do.
+func placementHint(k world.Kind, p world.Placement) string {
+	switch k {
+	case world.KStairs:
+		return fmt.Sprintf("Сходи: вгору на %d рівн. (%s) — ЛКМ поставити", p.Levels, dirNames[p.Dir&3])
+	case world.KBridge:
+		return fmt.Sprintf("Міст на висоті %d — ЛКМ поставити", p.Levels)
+	case world.KPlatform:
+		if p.Upgrade {
+			return fmt.Sprintf("Надбудова: рівень %d/%d — ЛКМ", p.Levels, world.MaxStack)
+		}
+		return fmt.Sprintf("Помост: рівень 1/%d — ЛКМ поставити", world.MaxStack)
+	}
+	if p.Base > 0 {
+		return fmt.Sprintf("Стоятиме на рівні %d — ЛКМ поставити", p.Base)
+	}
+	return "ЛКМ — поставити"
+}
+
+// DebugPitch sets the camera pitch for screenshots.
+func (g *Game) DebugPitch(p float64) { g.scene.Cam.Pitch = p }

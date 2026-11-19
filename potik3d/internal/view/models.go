@@ -3,6 +3,7 @@ package view
 import (
 	"image/color"
 	"math"
+	"sort"
 
 	"potik3d/internal/world"
 )
@@ -11,6 +12,10 @@ import (
 func drawBuilding(b *Batch, w *world.World, bd *world.Building, base, t float64, selected bool) {
 	x0, y0 := float64(bd.X), float64(bd.Y)
 	s := float64(bd.Size())
+	if bd.Kind == world.KStairs {
+		drawStairs(b, bd, base, selected)
+		return
+	}
 	if bd.Site {
 		drawSite(b, bd, x0, y0, s, base)
 		return
@@ -198,4 +203,149 @@ func drawSettler(b *Batch, w *world.World, st *world.Settler, t float64) {
 func itemColor(it world.Item) color.RGBA {
 	v := world.Items[it].Color
 	return rgb(v)
+}
+
+// siteProgress is how far a construction site has got (0..1): half for
+// delivered materials, half for building work.
+func siteProgress(bd *world.Building) float64 {
+	if !bd.Site {
+		return 1
+	}
+	total, left := 0, 0
+	for _, c := range bd.Def().Cost {
+		total += c.N
+	}
+	for _, c := range bd.Need {
+		left += c.N
+	}
+	prog := 0.0
+	if total > 0 {
+		prog = 0.5 * float64(total-left) / float64(total)
+	}
+	return prog + 0.5*float64(bd.Work)
+}
+
+// drawSupport draws a platform or bridge standing on the ground at level
+// height ground; levels is how high its deck is (for previews, the target).
+func drawSupport(b *Batch, w *world.World, bd *world.Building, ground, t float64, hi bool, levels int) {
+	x0, y0 := float64(bd.X), float64(bd.Y)
+	deck, post := colWoodLt, colWood
+	if hi {
+		deck = mix(deck, rgb(0xF2D16B), 0.45)
+	}
+	full := float64(levels) * LevelH
+	done := full
+	prog := siteProgress(bd)
+	if bd.Site {
+		if bd.Kind == world.KPlatform {
+			done = float64(levels-1) * LevelH
+		} else {
+			done = 0
+		}
+	}
+	switch bd.Kind {
+	case world.KPlatform:
+		// finished levels: a timber crate with a plank deck
+		if done > 0 {
+			b.Box(x0, y0, ground, x0+1, y0+1, ground+done-0.1, rgb(0x8C6B4A), rgb(0x8C6B4A))
+			for lv := 1; float64(lv)*LevelH < done+0.01; lv++ {
+				z := ground + float64(lv)*LevelH
+				b.Box(x0, y0, z-0.12, x0+1, y0+1, z, mix(post, deck, 0.4), deck)
+			}
+		}
+		if bd.Site {
+			// the new level: corner posts rising, then the deck
+			h := (full - done) * math.Min(1, prog*1.6)
+			for _, p := range [][2]float64{{0.08, 0.08}, {0.92, 0.08}, {0.08, 0.92}, {0.92, 0.92}} {
+				b.Box(x0+p[0]-0.05, y0+p[1]-0.05, ground+done, x0+p[0]+0.05, y0+p[1]+0.05, ground+done+h, post, post)
+			}
+			if prog > 0.65 {
+				z := ground + full
+				b.Box(x0, y0, z-0.1, x0+(prog-0.65)/0.35, y0+1, z, mix(post, deck, 0.4), deck)
+			}
+		}
+	case world.KBridge:
+		z := ground + full
+		posts := [][2]float64{{0.12, 0.12}, {0.88, 0.12}, {0.12, 0.88}, {0.88, 0.88}}
+		for _, p := range posts {
+			b.Box(x0+p[0]-0.05, y0+p[1]-0.05, ground-0.2, x0+p[0]+0.05, y0+p[1]+0.05, z-0.08, post, post)
+		}
+		if bd.Site {
+			if prog > 0.4 {
+				b.Box(x0, y0, z-0.08, x0+1, y0+(prog-0.4)/0.6, z, mix(post, deck, 0.4), deck)
+			}
+			return
+		}
+		b.Box(x0, y0, z-0.08, x0+1, y0+1, z, mix(post, deck, 0.4), deck)
+		// rails on edges that drop away
+		top := w.Surface(world.Idx(bd.X, bd.Y))
+		for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+			nx, ny := bd.X+d[0], bd.Y+d[1]
+			if world.In(nx, ny) && w.Surface(world.Idx(nx, ny)) >= top {
+				continue
+			}
+			var rx0, ry0, rx1, ry1 float64
+			switch {
+			case d[0] == 1:
+				rx0, ry0, rx1, ry1 = x0+0.92, y0, x0+0.98, y0+1
+			case d[0] == -1:
+				rx0, ry0, rx1, ry1 = x0+0.02, y0, x0+0.08, y0+1
+			case d[1] == 1:
+				rx0, ry0, rx1, ry1 = x0, y0+0.92, x0+1, y0+0.98
+			default:
+				rx0, ry0, rx1, ry1 = x0, y0+0.02, x0+1, y0+0.08
+			}
+			b.Box(rx0, ry0, z+0.22, rx1, ry1, z+0.28, post, deck)
+			for _, f := range []float64{0.1, 0.5, 0.9} {
+				px, py := rx0+(rx1-rx0)*f, ry0+(ry1-ry0)*f
+				if d[0] != 0 {
+					px = (rx0 + rx1) / 2
+				} else {
+					py = (ry0 + ry1) / 2
+				}
+				b.Box(px-0.03, py-0.03, z, px+0.03, py+0.03, z+0.22, post, post)
+			}
+		}
+	}
+}
+
+// drawStairs draws steps climbing rise levels towards dir.
+func drawStairs(b *Batch, bd *world.Building, base float64, selected bool) {
+	x0, y0 := float64(bd.X), float64(bd.Y)
+	rise := float64(max(1, bd.Levels)) * LevelH
+	n := 4 * max(1, bd.Levels)
+	if bd.Site {
+		n = int(math.Ceil(float64(n) * siteProgress(bd)))
+	}
+	col, topc := colWood, colWoodLt
+	if selected {
+		topc = mix(topc, rgb(0xF2D16B), 0.45)
+	}
+	type step struct {
+		x0, y0, x1, y1, z float64
+		depth             float64
+	}
+	steps := make([]step, 0, n)
+	for k := 0; k < n; k++ {
+		f0 := float64(k) / float64(4*max(1, bd.Levels))
+		f1 := float64(k+1) / float64(4*max(1, bd.Levels))
+		z := base + rise*f1
+		var s step
+		switch bd.Dir {
+		case 0: // +x
+			s = step{x0 + f0, y0 + 0.1, x0 + f1, y0 + 0.9, z, 0}
+		case 1: // -x
+			s = step{x0 + 1 - f1, y0 + 0.1, x0 + 1 - f0, y0 + 0.9, z, 0}
+		case 2: // +y
+			s = step{x0 + 0.1, y0 + f0, x0 + 0.9, y0 + f1, z, 0}
+		default: // -y
+			s = step{x0 + 0.1, y0 + 1 - f1, x0 + 0.9, y0 + 1 - f0, z, 0}
+		}
+		_, _, s.depth = b.cam.Project((s.x0+s.x1)/2, (s.y0+s.y1)/2, base)
+		steps = append(steps, s)
+	}
+	sort.Slice(steps, func(i, j int) bool { return steps[i].depth < steps[j].depth })
+	for _, s := range steps {
+		b.Box(s.x0, s.y0, base, s.x1, s.y1, s.z, col, topc)
+	}
 }

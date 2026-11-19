@@ -42,6 +42,7 @@ type Settler struct {
 
 	path    []int
 	pathKey int
+	pathEp  uint32
 	noPath  float32
 }
 
@@ -87,7 +88,7 @@ func (w *World) speed(s *Settler) float64 {
 	if s.Suffering() {
 		v *= 0.6
 	}
-	if w.Water[s.tile()] > 0.25 {
+	if i := s.tile(); float64(w.Height[i])+float64(w.Water[i]) > float64(w.WalkHeight(i))+0.25 {
 		v *= 0.5
 	}
 	return v
@@ -101,9 +102,9 @@ func (w *World) walk(s *Settler, key int, isGoal func(int) bool, tx, ty float64,
 		s.pathKey = key
 		return true
 	}
-	if s.pathKey != key || s.path == nil {
+	if s.pathKey != key || s.path == nil || s.pathEp != w.pathEpoch {
 		s.path = w.FindPath(cur, isGoal, tx, ty, goal)
-		s.pathKey = key
+		s.pathKey, s.pathEp = key, w.pathEpoch
 		if s.path == nil {
 			s.noPath += 1
 			s.pathKey = 0
@@ -115,6 +116,11 @@ func (w *World) walk(s *Settler, key int, isGoal func(int) bool, tx, ty float64,
 		return true
 	}
 	next := s.path[0]
+	if next != cur && !w.step(cur, next, goal, w.passable(next, goal) || isGoal(next)) {
+		// the way changed under our feet: plan again next tick
+		s.path = nil
+		return false
+	}
 	nx, ny := XY(next)
 	px, py := float64(nx)+0.5, float64(ny)+0.5
 	dx, dy := px-s.X, py-s.Y
@@ -217,6 +223,7 @@ func (w *World) stepSettler(s *Settler) {
 			site.Work += float32(DT * rate / site.Kind.BuildTime())
 			if site.Work >= 1 {
 				site.Site, site.Work = false, 0
+				w.pathEpoch++
 				s.Task = TaskNone
 				if site.Kind == KDam {
 					w.notice("Гребля збудована — вода підніметься.")
@@ -265,7 +272,7 @@ func (w *World) stepSettler(s *Settler) {
 			step := math.Min(d, WalkSpeed*0.3*DT)
 			nx, ny := s.X+dx/d*step, s.Y+dy/d*step
 			ni := Idx(clampi(int(nx), 0, Size-1), clampi(int(ny), 0, Size-1))
-			if w.passable(ni, 0) && absi(w.WalkHeight(ni)-w.WalkHeight(s.tile())) <= 1 {
+			if cur := s.tile(); w.passable(ni, 0) && (ni == cur || w.CanStep(cur, ni, 0)) {
 				s.X, s.Y = nx, ny
 			}
 		}

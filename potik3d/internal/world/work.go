@@ -102,7 +102,7 @@ func (w *World) fieldTarget(b *Building, s *Settler) int {
 			}
 			i := Idx(x, y)
 			d := dist(float64(x)+0.5, float64(y)+0.5, cx, cy)
-			if d > float64(r)+0.5 || d >= bd || claimed[i] || w.owner[i] != 0 {
+			if d > float64(r)+0.5 || d >= bd || claimed[i] || w.occupied(i) {
 				continue
 			}
 			ok := false
@@ -175,7 +175,7 @@ func (w *World) stepField(s *Settler, b *Building) bool {
 		case b.Kind == KGatherer && w.BushRipe(i):
 			w.Picked[i] = w.Tick
 			s.Carry = Stack{Berries, BerriesPerBush}
-		case b.Kind == KForester && w.Props[i] == PropNone && w.owner[i] == 0:
+		case b.Kind == KForester && w.Props[i] == PropNone && !w.occupied(i):
 			w.Props[i] = PropTree
 			w.Planted[i] = w.Tick
 		}

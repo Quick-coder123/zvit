@@ -69,3 +69,76 @@ func BuildDemo(w *World, seconds int) {
 	}
 	w.Notices = w.Notices[:0]
 }
+
+// finishSite completes a construction site at once (demos and tests).
+func (w *World) finishSite(b *Building) {
+	b.Site, b.Need, b.Work = false, nil, 0
+	w.pathEpoch++
+}
+
+// BuildVerticalDemo adds a raised terrace with a house, stairs up to it and
+// a bridge across the river near the hall, all finished.
+func BuildVerticalDemo(w *World) {
+	h := w.hall()
+	if h == nil {
+		return
+	}
+	place := func(k Kind, x, y int) *Building {
+		b, err := w.Place(k, x, y)
+		if err != nil {
+			return nil
+		}
+		w.finishSite(b)
+		return b
+	}
+	// a 2x2 terrace two levels up, with a house on one corner
+	for r := 0; r < 30; r++ {
+		x, y, ok := spot(w, KHouse, h.X+5+r%5, h.Y-5+r/5, func(i int) bool {
+			x, y := XY(i)
+			for dy := 0; dy < 2; dy++ {
+				for dx := -1; dx < 2; dx++ {
+					if w.CheckPlace(KHouse, x+dx, y+dy) != nil {
+						return false
+					}
+				}
+			}
+			return true
+		})
+		if !ok {
+			break
+		}
+		for lv := 0; lv < 2; lv++ {
+			for dy := 0; dy < 2; dy++ {
+				for dx := 0; dx < 2; dx++ {
+					place(KPlatform, x+dx, y+dy)
+				}
+			}
+		}
+		place(KHouse, x+1, y)
+		place(KStairs, x-1, y+1)
+		break
+	}
+	// a bridge across the river on a free row near the hall
+	for _, dy := range []int{0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6} {
+		y := h.Y + dy
+		x := h.X - 1
+		for x > 0 && w.passable(Idx(x, y), 0) && w.owner[Idx(x, y)] == 0 && w.Height[Idx(x, y)] > 0 {
+			x--
+		}
+		if x <= 0 || w.Height[Idx(x, y)] != 0 || w.owner[Idx(x, y)] != 0 || w.passable(Idx(x, y), 0) {
+			continue
+		}
+		n := 0
+		for ; x > 0 && w.CheckPlace(KBridge, x, y) == nil; x-- {
+			place(KBridge, x, y)
+			n++
+			if w.passable(Idx(x-1, y), 0) && w.Height[Idx(x-1, y)] >= 1 {
+				break
+			}
+		}
+		if n > 0 {
+			break
+		}
+	}
+	w.Notices = w.Notices[:0]
+}

@@ -270,8 +270,18 @@ func (g *Game) drawBuildBar(dst *ebiten.Image, W, H, u float64) {
 
 func (g *Game) drawToolHint(dst *ebiten.Image, W, H, u float64) {
 	d := world.Builds[g.tool]
+	status, c := "Наведіть на місце для будівлі", color.Color(colDim)
+	if g.hoverX >= 0 {
+		x, yy := g.footprint(g.tool)
+		if p, err := g.w.PlanPlacement(g.tool, x, yy); err != nil {
+			status, c = err.Error(), colBad
+		} else {
+			status, c = placementHint(g.tool, p), colGood
+		}
+	}
 	lines := g.wrap(d.Desc, 13, 300*u)
-	h := float64(len(lines))*17*u + 60*u
+	slines := g.wrap(status, 13, 300*u)
+	h := float64(len(lines)+len(slines))*17*u + 56*u
 	r := rect{12 * u, H - 94*u - h - 10*u, 324 * u, h}
 	fill(dst, r, colPanel2)
 	g.panels = append(g.panels, r)
@@ -281,14 +291,11 @@ func (g *Game) drawToolHint(dst *ebiten.Image, W, H, u float64) {
 		g.txt(dst, l, r.x+12*u, y, 13, colDim, false)
 		y += 17 * u
 	}
-	status, c := "ЛКМ — поставити", colGood
-	if g.hoverX >= 0 {
-		x, yy := g.footprint(g.tool)
-		if err := g.w.CheckPlace(g.tool, x, yy); err != nil {
-			status, c = err.Error(), colBad
-		}
+	y += 4 * u
+	for _, l := range slines {
+		g.txt(dst, l, r.x+12*u, y, 13, c, false)
+		y += 17 * u
 	}
-	g.txt(dst, status, r.x+12*u, y+4*u, 13, c, false)
 }
 
 func (g *Game) drawSelection(dst *ebiten.Image, b *world.Building, W, H, u float64) {
@@ -321,6 +328,17 @@ func (g *Game) drawSelection(dst *ebiten.Image, b *world.Building, W, H, u float
 		}
 	case b.Paused:
 		add(colWarn, "На паузі — працівники вільні")
+	}
+	switch b.Kind {
+	case world.KPlatform:
+		add(colText, "Рівнів: %d/%d", b.Levels, world.MaxStack)
+		if g.w.BuildingAt(b.X, b.Y) != nil {
+			add(colDim, "Зверху стоїть будівля — спершу знесіть її, щоб прибрати помост")
+		}
+	case world.KBridge:
+		add(colText, "Висота настилу: %d", b.Levels)
+	case world.KStairs:
+		add(colText, "Підйом: %d рівн. на %s", b.Levels, dirNames[b.Dir&3])
 	}
 	if d.Workers > 0 && !b.Site {
 		c := color.Color(colText)

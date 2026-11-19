@@ -17,6 +17,7 @@ type Building struct {
 	Paused   bool
 	Progress float32 // production progress
 	Working  bool
+	Levels   int  // platforms: levels raised (1..3); bridges: deck height above ground
 	Recipe   int  // reserved for crafters (-1 none)
 	InN      int  // input buffer (sawmill logs)
 	Out      Item // produced item waiting for pickup
@@ -151,29 +152,140 @@ func (w *World) consume(items ...Item) Item {
 // --- placing ---------------------------------------------------------------------
 
 var (
-	ErrBlocked = errors.New("тут не можна будувати: потрібна рівна суха вільна земля")
-	ErrNoWater = errors.New("насос треба ставити біля води")
-	ErrDry     = errors.New("поле потребує вологого ґрунту біля води")
-	ErrHall    = errors.New("ратушу не можна знести")
+	ErrBlocked    = errors.New("тут не можна будувати: потрібна рівна суха вільна земля")
+	ErrNoWater    = errors.New("насос треба ставити біля води")
+	ErrDry        = errors.New("поле потребує вологого ґрунту біля води")
+	ErrHall       = errors.New("ратушу не можна знести")
+	ErrTooHigh    = errors.New("помост вже найвищий (3 рівні)")
+	ErrGroundOnly = errors.New("це ставиться лише на землю, не на поміст")
+	ErrStairs     = errors.New("сходи мають вести вгору: поставте біля уступу на 1–2 рівні")
+	ErrNoBank     = errors.New("міст має спиратися на берег або інший міст")
+	ErrTopFirst   = errors.New("спочатку знесіть те, що стоїть зверху")
 )
 
-// CheckPlace validates a placement.
-func (w *World) CheckPlace(k Kind, x, y int) error {
+// Placement is what placing a building at a spot would do.
+type Placement struct {
+	Dir     int  // stairs: direction they climb (0 +x, 1 -x, 2 +y, 3 -y)
+	Levels  int  // platform/bridge: levels above the ground
+	Upgrade bool // adds a level to an existing platform
+	Base    int  // level the building stands on (supports: ground level)
+}
+
+// PlanPlacement validates a placement and works out its automatic choices.
+// Place uses the same result, so a preview always matches the build.
+func (w *World) PlanPlacement(k Kind, x, y int) (Placement, error) {
+	if k <= KNone || k >= KindCount {
+		return Placement{}, ErrBlocked
+	}
 	d := &Builds[k]
-	if !w.CanPlaceAt(x, y, d.Size, d.WaterOK) {
-		return ErrBlocked
+	sz := d.Size
+	if d.Hidden || !In(x, y) || !In(x+sz-1, y+sz-1) {
+		return Placement{}, ErrBlocked
+	}
+	i := Idx(x, y)
+	switch k {
+	case KPlatform:
+		if w.owner[i] != 0 {
+			return Placement{}, ErrBlocked
+		}
+		if sp := w.Support(i); sp != nil {
+			if sp.Kind != KPlatform || sp.Site {
+				return Placement{}, ErrBlocked
+			}
+			if sp.Levels >= MaxStack {
+				return Placement{}, ErrTooHigh
+			}
+			return Placement{Levels: sp.Levels + 1, Upgrade: true, Base: int(w.Height[i])}, nil
+		}
+		if w.Height[i] == 0 || w.Water[i] > 0.15 {
+			return Placement{}, ErrBlocked
+		}
+		return Placement{Levels: 1, Base: int(w.Height[i])}, nil
+	case KBridge:
+		if w.owner[i] != 0 || w.support[i] != 0 {
+			return Placement{}, ErrBlocked
+		}
+		target := -1
+		for _, dd := range dirs4 {
+			nx, ny := x+dd[0], y+dd[1]
+			if !In(nx, ny) {
+				continue
+			}
+			j := Idx(nx, ny)
+			h := -1
+			if sb := w.Support(j); sb != nil && sb.Kind == KBridge {
+				h = int(w.Height[j]) + sb.Levels // planned deck, even while building
+			} else if w.passable(j, 0) {
+				h = w.WalkHeight(j)
+			}
+			target = max(target, h)
+		}
+		if target < 0 {
+			return Placement{}, ErrNoBank
+		}
+		lv := max(1, min(MaxStack, target-int(w.Height[i])))
+		return Placement{Levels: lv, Base: int(w.Height[i])}, nil
+	}
+
+	// top-layer buildings: on level ground or on finished platforms
+	base := w.Surface(i)
+	elevated := w.support[i] != 0
+	for dy := 0; dy < sz; dy++ {
+		for dx := 0; dx < sz; dx++ {
+			j := Idx(x+dx, y+dy)
+			if w.owner[j] != 0 || w.Surface(j) != base {
+				return Placement{}, ErrBlocked
+			}
+			sp := w.Support(j)
+			if (sp != nil) != elevated || (sp != nil && (sp.Kind != KPlatform || sp.Site)) {
+				return Placement{}, ErrBlocked
+			}
+			if elevated {
+				if float64(w.Height[j])+float64(w.Water[j]) >= float64(base)-0.15 {
+					return Placement{}, ErrBlocked
+				}
+			} else if !d.WaterOK && (w.Water[j] > 0.15 || w.Height[j] == 0) {
+				return Placement{}, ErrBlocked
+			}
+		}
+	}
+	p := Placement{Base: base}
+	switch k {
+	case KFarm, KPump, KDam:
+		if elevated {
+			return Placement{}, ErrGroundOnly
+		}
 	}
 	switch k {
 	case KPump:
-		if !w.nearWater(x, y, d.Size) {
-			return ErrNoWater
+		if !w.nearWater(x, y, sz) {
+			return Placement{}, ErrNoWater
 		}
 	case KFarm:
-		if !w.moist[Idx(x, y)] {
-			return ErrDry
+		if !w.moist[i] {
+			return Placement{}, ErrDry
+		}
+	case KStairs:
+		p.Dir = -1
+		for _, rise := range []int{2, 1} {
+			for dir, dd := range dirs4 {
+				nx, ny := x+dd[0], y+dd[1]
+				if p.Dir < 0 && In(nx, ny) && w.passable(Idx(nx, ny), 0) && w.WalkHeight(Idx(nx, ny))-base == rise {
+					p.Dir, p.Levels = dir, rise
+				}
+			}
+		}
+		if p.Dir < 0 {
+			return Placement{}, ErrStairs
 		}
 	}
-	return nil
+	return p, nil
+}
+
+// CheckPlace validates a placement.
+func (w *World) CheckPlace(k Kind, x, y int) error {
+	_, err := w.PlanPlacement(k, x, y)
+	return err
 }
 
 func (w *World) nearWater(x, y, size int) bool {
@@ -187,12 +299,20 @@ func (w *World) nearWater(x, y, size int) bool {
 	return false
 }
 
-// Place puts down a construction site.
+// Place puts down a construction site (or starts raising a platform).
 func (w *World) Place(k Kind, x, y int) (*Building, error) {
-	if err := w.CheckPlace(k, x, y); err != nil {
+	p, err := w.PlanPlacement(k, x, y)
+	if err != nil {
 		return nil, err
 	}
-	b := &Building{Kind: k, X: x, Y: y, Site: true, Recipe: -1}
+	if p.Upgrade {
+		sp := w.Support(Idx(x, y))
+		sp.Levels, sp.Site, sp.Work = p.Levels, true, 0
+		sp.Need = append([]Stack(nil), Builds[k].Cost...)
+		w.pathEpoch++
+		return sp, nil
+	}
+	b := &Building{Kind: k, X: x, Y: y, Site: true, Recipe: -1, Dir: p.Dir, Levels: p.Levels}
 	b.Need = append([]Stack(nil), Builds[k].Cost...)
 	return w.add(b), nil
 }
@@ -207,6 +327,15 @@ func (w *World) Remove(id int32) error {
 	if b.Kind == KHall {
 		return ErrHall
 	}
+	if b.Kind.IsSupport() {
+		for dy := 0; dy < b.Size(); dy++ {
+			for dx := 0; dx < b.Size(); dx++ {
+				if w.owner[Idx(b.X+dx, b.Y+dy)] != 0 {
+					return ErrTopFirst
+				}
+			}
+		}
+	}
 	refund := map[Item]int{}
 	for _, c := range Builds[b.Kind].Cost {
 		left := 0
@@ -216,6 +345,9 @@ func (w *World) Remove(id int32) error {
 			}
 		}
 		refund[c.Item] += c.N - left
+		if b.Kind == KPlatform && b.Levels > 1 {
+			refund[c.Item] += c.N * (b.Levels - 1) // finished lower levels
+		}
 	}
 	for _, s := range b.Store {
 		refund[s.Item] += s.N

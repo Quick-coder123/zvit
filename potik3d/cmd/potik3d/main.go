@@ -37,6 +37,8 @@ func main() {
 	frames := flag.Int("debug-frames", 30, "")
 	demo := flag.Int("debug-demo", 0, "секунд симуляції демо-містечка")
 	help := flag.Bool("debug-help", false, "")
+	vertical := flag.Bool("debug-vertical", false, "")
+	pitch := flag.Float64("debug-pitch", 0.85, "")
 	tool := flag.Int("debug-tool", 0, "")
 	sel := flag.Bool("debug-select", false, "")
 	yaw := flag.Float64("debug-yaw", 0.55, "")
@@ -76,7 +78,11 @@ func main() {
 		if *demo > 0 {
 			world.BuildDemo(w, *demo)
 		}
+		if *vertical {
+			world.BuildVerticalDemo(w)
+		}
 		g.Debug(*help, world.Kind(*tool), *sel, *yaw, *scale)
+		g.DebugPitch(*pitch)
 		g.SetScreenshot(*shot, *frames)
 	}
 	ebiten.SetWindowTitle("Потік 3D " + app.Version)

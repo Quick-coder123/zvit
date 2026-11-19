@@ -49,7 +49,9 @@ type World struct {
 
 	Notices []string // UI messages (not saved)
 
-	owner      []int32 // building id per tile
+	owner      []int32 // top-layer building id per tile
+	support    []int32 // platform/bridge id per tile
+	pathEpoch  uint32  // bumped whenever walkability changes
 	flux       []float32
 	springs    []int
 	sinks      []int
@@ -151,6 +153,7 @@ func (w *World) generate() {
 func (w *World) initCaches() {
 	n := Size * Size
 	w.owner = make([]int32, n)
+	w.support = make([]int32, n)
 	w.flux = make([]float32, 4*n)
 	w.moist = make([]bool, n)
 	if w.Planted == nil {
@@ -216,7 +219,7 @@ func (w *World) CanPlaceAt(x, y, size int, inWater bool) bool {
 	for dy := 0; dy < size; dy++ {
 		for dx := 0; dx < size; dx++ {
 			i := Idx(x+dx, y+dy)
-			if w.owner[i] != 0 || w.Height[i] != h {
+			if w.owner[i] != 0 || w.support[i] != 0 || w.Height[i] != h {
 				return false
 			}
 			if !inWater && (w.Water[i] > 0.15 || h == 0) {
@@ -227,7 +230,45 @@ func (w *World) CanPlaceAt(x, y, size int, inWater bool) bool {
 	return true
 }
 
-// Owner returns the building on a tile, or nil.
+// Support returns the platform or bridge under a tile, or nil.
+func (w *World) Support(i int) *Building {
+	if id := w.support[i]; id != 0 {
+		return w.Buildings[id]
+	}
+	return nil
+}
+
+// SupportAt returns the platform or bridge on a tile, or nil.
+func (w *World) SupportAt(x, y int) *Building {
+	if !In(x, y) {
+		return nil
+	}
+	return w.Support(Idx(x, y))
+}
+
+// supportLevels is how many levels a support currently adds.
+func supportLevels(b *Building) int {
+	switch {
+	case b == nil:
+		return 0
+	case b.Kind == KPlatform && b.Site:
+		return max(0, b.Levels-1)
+	case b.Site:
+		return 0
+	}
+	return b.Levels
+}
+
+// Surface is the level of the walkable surface of a tile: the ground plus
+// any finished platform or bridge on it.
+func (w *World) Surface(i int) int {
+	return int(w.Height[i]) + supportLevels(w.Support(i))
+}
+
+// occupied reports tiles field workers must leave alone.
+func (w *World) occupied(i int) bool { return w.owner[i] != 0 || w.support[i] != 0 }
+
+// Owner returns the top-layer building on a tile, or nil.
 func (w *World) Owner(i int) *Building {
 	if id := w.owner[i]; id != 0 {
 		return w.Buildings[id]
@@ -244,11 +285,16 @@ func (w *World) BuildingAt(x, y int) *Building {
 }
 
 func (w *World) mark(b *Building, id int32) {
+	layer := w.owner
+	if b.Kind.IsSupport() {
+		layer = w.support
+	}
+	w.pathEpoch++
 	s := b.Size()
 	for dy := 0; dy < s; dy++ {
 		for dx := 0; dx < s; dx++ {
 			if In(b.X+dx, b.Y+dy) {
-				w.owner[Idx(b.X+dx, b.Y+dy)] = id
+				layer[Idx(b.X+dx, b.Y+dy)] = id
 			}
 		}
 	}
