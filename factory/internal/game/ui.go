@@ -482,30 +482,76 @@ func (g *Game) dim(dst *ebiten.Image) {
 func (g *Game) drawMenu(dst *ebiten.Image) {
 	u := g.ui
 	g.dim(dst)
-	W, H := 320*u, 342*u
+	firstButton := len(g.buttons)
+	type item struct {
+		label  string
+		action func()
+		accent bool
+	}
+	peace := "Мирний режим: вимкнено"
+	if g.w.Peaceful {
+		peace = "Мирний режим: увімкнено"
+	}
+	items := []item{
+		{"Продовжити", func() { g.menu = false }, false},
+		{"Зберегти", func() { g.Save(); g.say("Збережено") }, false},
+		{peace, func() {
+			g.w.Peaceful = !g.w.Peaceful
+			if g.w.Peaceful {
+				g.say("Мирний режим: хвилі не приходять")
+			} else {
+				g.say("Хвилі знову приходитимуть")
+			}
+		}, false},
+		{"Почати заново", func() { g.confirmNew = true }, false},
+	}
+	if g.updateReady {
+		items = append(items, item{"Перезапустити з оновленням", g.restartForUpdate, true})
+	}
+	items = append(items, item{"Зберегти й вийти", func() { g.quit = true }, false})
+
+	W := 340 * u
+	H := (110 + float64(len(items))*52 + 40) * u
 	r := rect{g.cam.W/2 - W/2, g.cam.H/2 - H/2, W, H}
 	panel(dst, r, u)
 	drawText(dst, "Потік", r.x+W/2, r.y+20*u, 26*u, true, colInk, alignCenter)
 	drawText(dst, "пауза", r.x+W/2, r.y+56*u, 13*u, false, colInkSoft, alignCenter)
 	bw := W - 60*u
 	y := r.y + 90*u
-	g.bigButton(dst, rect{r.x + 30*u, y, bw, 42 * u}, "Продовжити", func() { g.menu = false })
-	g.bigButton(dst, rect{r.x + 30*u, y + 52*u, bw, 42 * u}, "Зберегти", func() { g.Save(); g.say("Збережено") })
-	peace := "Мирний режим: вимкнено"
-	if g.w.Peaceful {
-		peace = "Мирний режим: увімкнено"
-	}
-	g.bigButton(dst, rect{r.x + 30*u, y + 104*u, bw, 42 * u}, peace, func() {
-		g.w.Peaceful = !g.w.Peaceful
-		if g.w.Peaceful {
-			g.say("Мирний режим: хвилі не приходять")
-		} else {
-			g.say("Хвилі знову приходитимуть")
+	for _, it := range items {
+		br := rect{r.x + 30*u, y, bw, 42 * u}
+		if it.accent {
+			fillRoundRect(dst, float32(br.x-3*u), float32(br.y-3*u), float32(br.w+6*u), float32(br.h+6*u), float32(10*u), colOK)
 		}
-	})
-	g.bigButton(dst, rect{r.x + 30*u, y + 156*u, bw, 42 * u}, "Зберегти й вийти", func() { g.quit = true })
+		g.bigButton(dst, br, it.label, it.action)
+		y += 52 * u
+	}
 	ago := time.Since(g.lastSave).Round(time.Second)
-	drawText(dst, fmt.Sprintf("Автозбереження: %v тому", ago), r.x+W/2, r.y+H-30*u, 11.5*u, false, colInkSoft, alignCenter)
+	drawText(dst, fmt.Sprintf("Автозбереження: %v тому · версія %s", ago, Version), r.x+W/2, r.y+H-34*u, 11.5*u, false, colInkSoft, alignCenter)
+
+	if g.confirmNew {
+		g.buttons = g.buttons[:firstButton] // only the dialog is clickable
+		g.drawConfirmNew(dst)
+	}
+}
+
+func (g *Game) drawConfirmNew(dst *ebiten.Image) {
+	u := g.ui
+	fillRect(dst, 0, 0, float32(g.cam.W), float32(g.cam.H), rgba(0x2E3440, 0x55))
+	W, H := 460*u, 230*u
+	r := rect{g.cam.W/2 - W/2, g.cam.H/2 - H/2, W, H}
+	panel(dst, r, u)
+	drawText(dst, "Почати заново?", r.x+24*u, r.y+20*u, 20*u, true, colInk, alignLeft)
+	msg := "Твій світ, запаси й дослідження скинуться до початку.\n" +
+		"Поточний світ збережеться в резервну копію (зберігаються 5 останніх).\n" +
+		"Це стосується тільки тебе: у інших гравців власні збереження."
+	drawText(dst, wrap(msg, 64), r.x+24*u, r.y+60*u, 13*u, false, colInk, alignLeft)
+	bw := (W - 60*u) / 2
+	by := r.y + H - 62*u
+	g.bigButton(dst, rect{r.x + 24*u, by, bw, 42 * u}, "Скасувати", func() { g.confirmNew = false })
+	yes := rect{r.x + 36*u + bw, by, bw, 42 * u}
+	fillRoundRect(dst, float32(yes.x-3*u), float32(yes.y-3*u), float32(yes.w+6*u), float32(yes.h+6*u), float32(10*u), colBad)
+	g.bigButton(dst, yes, "Так, почати заново", g.newGame)
 }
 
 const helpText = `Будуй фабрику, досліджуй нове й захищай ядро від хвиль.

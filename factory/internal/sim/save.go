@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 )
 
 const SaveVersion = 2
@@ -123,3 +125,25 @@ func LoadFile(path string) (*World, error) {
 
 // IsNotExist reports a missing save.
 func IsNotExist(err error) bool { return errors.Is(err, os.ErrNotExist) }
+
+// BackupSave renames an existing save to "<path>.<time>.bak" and keeps only
+// the newest `keep` backups. Returns the backup path ("" if there was no save).
+func BackupSave(path string, keep int) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	bak := path + "." + time.Now().Format("2006-01-02_15-04-05") + ".bak"
+	if err := os.Rename(path, bak); err != nil {
+		return "", err
+	}
+	old, _ := filepath.Glob(path + ".*.bak")
+	sort.Strings(old) // timestamps sort chronologically
+	for len(old) > keep {
+		os.Remove(old[0])
+		old = old[1:]
+	}
+	return bak, nil
+}

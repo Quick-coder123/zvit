@@ -11,6 +11,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"potik/internal/game"
+	"potik/internal/launch"
 	"potik/internal/sim"
 )
 
@@ -23,6 +24,11 @@ func defaultSavePath() string {
 }
 
 func main() {
+	// Run from a per-user copy so potik.exe in the game folder can be
+	// replaced with a new version at any time.
+	if launch.Relaunch() {
+		return
+	}
 	savePath := flag.String("save", defaultSavePath(), "шлях до файлу збереження")
 	fresh := flag.Bool("new", false, "почати новий світ (старий буде перейменовано)")
 	shot := flag.String("debug-shot", "", "")
@@ -43,14 +49,19 @@ func main() {
 			os.Rename(*savePath, *savePath+".broken")
 			w = nil
 		}
-	} else if _, err := os.Stat(*savePath); *savePath != "" && err == nil {
-		os.Rename(*savePath, *savePath+"."+time.Now().Format("20060102-150405")+".bak")
+	} else if *savePath != "" {
+		sim.BackupSave(*savePath, 5)
 	}
 	if w == nil {
 		w = sim.NewWorld(time.Now().UnixNano())
 	}
 
 	g := game.New(w, *savePath)
+	if launch.Shadowed() {
+		origin := launch.Origin()
+		watcher := launch.NewWatcher(origin)
+		g.SetUpdater(watcher.Changed, func() error { return launch.Restart(origin) })
+	}
 	if *shot != "" {
 		w.Seed = 7
 		if *shotScene != "start" {
@@ -67,7 +78,7 @@ func main() {
 		}
 		g.SetScreenshot(*shot, *shotFrames, func(g *game.Game) { debugScene(g, w, *shotScene) })
 	}
-	ebiten.SetWindowTitle("Потік")
+	ebiten.SetWindowTitle("Потік " + game.Version)
 	ebiten.SetWindowSize(1280, 800)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowClosingHandled(true)
@@ -114,6 +125,10 @@ func debugScene(g *game.Game, w *sim.World, scene string) {
 		if scene == "research" {
 			g.DebugResearch(true)
 		}
+	case "menu":
+		g.DebugMenu(true, false)
+	case "confirm":
+		g.DebugMenu(false, true)
 	case "far":
 		g.DebugCamera(0, 0, 9)
 	}

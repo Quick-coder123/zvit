@@ -2,6 +2,8 @@ package sim
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -195,4 +197,27 @@ func roundTrip(t *testing.T, w *World) *World {
 		t.Fatal(err)
 	}
 	return w2
+}
+
+func TestBackupRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/solo.sav"
+	if b, err := BackupSave(path, 2); err != nil || b != "" {
+		t.Fatalf("no save: %q %v", b, err)
+	}
+	for i := 0; i < 4; i++ {
+		os.WriteFile(path, []byte{byte(i)}, 0o644)
+		// distinct timestamps
+		os.WriteFile(path+".0000-0"+string(rune('0'+i))+".bak", nil, 0o644)
+	}
+	if _, err := BackupSave(path, 2); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := filepath.Glob(path + ".*.bak")
+	if len(left) != 2 {
+		t.Fatalf("kept %d backups", len(left))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("save should be moved away")
+	}
 }

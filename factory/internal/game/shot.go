@@ -64,3 +64,9 @@ func (g *Game) DebugTool(k sim.Kind, d sim.Dir) { g.tool, g.dir = k, d }
 
 // DebugResearch opens the research panel.
 func (g *Game) DebugResearch(on bool) { g.research = on }
+
+// DebugMenu opens the pause menu, optionally with the update button and the
+// start-over dialog.
+func (g *Game) DebugMenu(update, confirm bool) {
+	g.menu, g.updateReady, g.confirmNew = true, update, confirm
+}

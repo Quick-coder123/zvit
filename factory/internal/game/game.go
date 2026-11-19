@@ -59,6 +59,49 @@ type Game struct {
 	pasting   bool
 	iconMode  bool // drawing toolbar icons, not the world
 	research  bool // research panel open
+
+	confirmNew  bool        // "start over?" dialog
+	checkUpdate func() bool // reports a new build in the game folder
+	restart     func() error
+	updateReady bool
+}
+
+// Version is set at build time (-ldflags "-X potik/internal/game.Version=...").
+var Version = "dev"
+
+// SetUpdater connects the in-game update notice and restart button.
+func (g *Game) SetUpdater(check func() bool, restart func() error) {
+	g.checkUpdate, g.restart = check, restart
+}
+
+// newGame backs up the current world and starts a fresh one for this player.
+func (g *Game) newGame() {
+	g.confirmNew = false
+	if g.savePath != "" {
+		if _, err := sim.BackupSave(g.savePath, 5); err != nil {
+			g.say("Не вдалося зробити резервну копію: %v", err)
+			return
+		}
+	}
+	g.w = sim.NewWorld(time.Now().UnixNano())
+	g.cam.X, g.cam.Y, g.cam.Scale = 0, 0, 40*g.ui
+	g.tool, g.dir, g.selected = sim.KNone, sim.East, 0
+	g.clip, g.pasting, g.selecting = nil, false, false
+	g.research, g.menu, g.help = false, false, true
+	g.Save()
+	g.say("Новий світ! Попередній збережено в резервну копію.")
+}
+
+func (g *Game) restartForUpdate() {
+	g.Save()
+	if g.restart == nil {
+		return
+	}
+	if err := g.restart(); err != nil {
+		g.say("Не вдалося перезапустити: %v", err)
+		return
+	}
+	g.quit = true
 }
 
 // New creates the game around a world; savePath is used for autosave.
@@ -118,6 +161,10 @@ func (g *Game) Update() error {
 	if time.Since(g.lastSave) > autosaveEvery {
 		g.Save()
 	}
+	if !g.updateReady && g.checkUpdate != nil && g.checkUpdate() {
+		g.updateReady = true
+		g.say("Вийшла нова версія! Esc → «Перезапустити з оновленням»")
+	}
 	return nil
 }
 
@@ -151,6 +198,8 @@ func (g *Game) handleInput() {
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		switch {
+		case g.confirmNew:
+			g.confirmNew = false
 		case g.help:
 			g.help = false
 		case g.research:
