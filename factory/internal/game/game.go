@@ -106,6 +106,7 @@ func (g *Game) restartForUpdate() {
 
 // New creates the game around a world; savePath is used for autosave.
 func New(w *sim.World, savePath string) *Game {
+	loadTextures()
 	g := &Game{w: w, savePath: savePath, lastSave: time.Now(), help: w.Tick == 0}
 	g.cam.Scale = 40
 	return g

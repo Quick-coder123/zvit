@@ -26,6 +26,7 @@ func (c *Camera) ToWorld(sx, sy float64) (float64, float64) {
 
 func (g *Game) drawWorld(dst *ebiten.Image) {
 	dst.Fill(colBG)
+	g.drawGround(dst)
 	cam := &g.cam
 	x0, y0 := cam.ToWorld(0, 0)
 	x1, y1 := cam.ToWorld(cam.W, cam.H)
@@ -33,24 +34,14 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 	tx1, ty1 := int(math.Ceil(x1))+1, int(math.Ceil(y1))+1
 	s := float32(cam.Scale)
 
-	// grid
-	if cam.Scale >= 18 {
-		gc := colGrid
-		for x := tx0; x <= tx1; x++ {
-			sx, _ := cam.ToScreen(float64(x), 0)
-			fillRect(dst, sx, 0, 1, float32(cam.W), gc)
-		}
-		for y := ty0; y <= ty1; y++ {
-			_, sy := cam.ToScreen(0, float64(y))
-			fillRect(dst, 0, sy, float32(cam.W), 1, gc)
-		}
-	}
-
 	// ore deposits
 	for y := ty0; y <= ty1; y++ {
 		for x := tx0; x <= tx1; x++ {
 			it := g.w.OreAt(sim.Pos{X: x, Y: y})
 			if it == sim.ItemNone {
+				continue
+			}
+			if g.drawOreTile(dst, it, x, y) {
 				continue
 			}
 			sx, sy := cam.ToScreen(float64(x), float64(y))
@@ -69,6 +60,19 @@ func (g *Game) drawWorld(dst *ebiten.Image) {
 				py := float32(h>>8&0xFF) / 255
 				fillCircle(dst, sx+s*(0.25+px*0.5), sy+s*(0.25+py*0.5), s*(0.07+0.03*float32(k)), mix(colBG, c, 0.55))
 			}
+		}
+	}
+
+	// grid
+	if cam.Scale >= 18 {
+		gc := rgba(0xD9D1C2, 0x70)
+		for x := tx0; x <= tx1; x++ {
+			sx, _ := cam.ToScreen(float64(x), 0)
+			fillRect(dst, sx, 0, 1, float32(cam.W), gc)
+		}
+		for y := ty0; y <= ty1; y++ {
+			_, sy := cam.ToScreen(0, float64(y))
+			fillRect(dst, 0, sy, float32(cam.W), 1, gc)
 		}
 	}
 

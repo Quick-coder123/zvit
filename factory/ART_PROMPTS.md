@@ -37,7 +37,7 @@ Reply "ok" and wait for my requests.
 
 ## 1. Ландшафт
 
-Вже готово: `ground`, `ore_iron`, `ore_copper` (лежать у `assets/`).
+Вже готово й підключено в гру: `ground`, `ore_iron`, `ore_copper`. Нові картинки вшиваються в `potik.exe` при збірці.
 
 ### `ore_coal.png`: поклад вугілля
 ```
